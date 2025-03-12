@@ -221,6 +221,120 @@ class UltimateDataFetcher:
             logger.error(f"Error in live data fetching: {e}")
             raise
 
+    async def convert_historical_to_tfrecord(
+        self,
+        markets: List[str],
+        time_range: TimeRange,
+        resolution: str,
+        exchanges: Optional[List[str]] = None
+    ):
+        """
+        Convert historical data to TFRecord format for machine learning.
+        
+        Args:
+            markets: List of market symbols
+            time_range: Time range to convert
+            resolution: Candle resolution
+            exchanges: Optional list of exchanges to use
+        """
+        if not exchanges:
+            exchanges = list(self.exchange_handlers.keys())
+        
+        logger.info(f"Converting historical data to TFRecord format for {markets} with resolution {resolution}")
+        
+        for exchange_name in exchanges:
+            for market_symbol in markets:
+                try:
+                    # Convert market symbol if needed
+                    if exchange_name in self.symbol_mapper.exchanges:
+                        exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, market_symbol)
+                    else:
+                        exchange_market = market_symbol
+                    
+                    logger.info(f"Converting {exchange_name}/{exchange_market} data to TFRecord format")
+                    
+                    # Convert to TFRecord
+                    await self.data_manager.convert_to_tfrecord(
+                        exchange_name,
+                        exchange_market,
+                        resolution,
+                        time_range.start,
+                        time_range.end
+                    )
+                    
+                    logger.info(f"Converted {exchange_name}/{exchange_market} data to TFRecord format")
+                    
+                except Exception as e:
+                    logger.error(f"Error converting {market_symbol} from {exchange_name} to TFRecord: {e}")
+        
+        logger.info("TFRecord conversion completed")
+
+    def get_pytorch_dataloader(
+        self,
+        market: str,
+        resolution: str,
+        exchange: str,
+        batch_size: int = 32,
+        shuffle: bool = True
+    ):
+        """
+        Get a PyTorch DataLoader for the specified data.
+        
+        Args:
+            market: Market symbol
+            resolution: Candle resolution
+            exchange: Exchange name
+            batch_size: Batch size
+            shuffle: Whether to shuffle the data
+            
+        Returns:
+            torch.utils.data.DataLoader: DataLoader for the data
+        """
+        # Convert market symbol if needed
+        if exchange in self.symbol_mapper.exchanges:
+            exchange_market = self.symbol_mapper.to_exchange_symbol(exchange, market)
+        else:
+            exchange_market = market
+        
+        return self.data_manager.get_pytorch_dataloader(
+            exchange,
+            exchange_market,
+            resolution,
+            batch_size,
+            shuffle
+        )
+
+    def get_tensorflow_dataset(
+        self,
+        market: str,
+        resolution: str,
+        exchange: str,
+        batch_size: int = 32
+    ):
+        """
+        Get a TensorFlow Dataset for the specified data.
+        
+        Args:
+            market: Market symbol
+            resolution: Candle resolution
+            exchange: Exchange name
+            batch_size: Batch size
+            
+        Returns:
+            tf.data.Dataset: TensorFlow dataset
+        """
+        # Convert market symbol if needed
+        if exchange in self.symbol_mapper.exchanges:
+            exchange_market = self.symbol_mapper.to_exchange_symbol(exchange, market)
+        else:
+            exchange_market = market
+        
+        return self.data_manager.get_tensorflow_dataset(
+            exchange,
+            exchange_market,
+            resolution,
+            batch_size
+        )
 
     async def main():
         """Main entry point for the Ultimate Data Fetcher."""
@@ -233,6 +347,10 @@ class UltimateDataFetcher:
         parser.add_argument("--resolution", default="1", choices=["1", "15", "60", "240", "1D" , "1W", "5", "30"], help="Candle resolution (e.g., 1, 5, 15)")
         parser.add_argument("--start-date", help="Start date for historical data (YYYY-MM-DD)")
         parser.add_argument("--end-date", help="End date for historical data (YYYY-MM-DD)")
+        parser.add_argument("--convert-tfrecord", action="store_true", 
+                            help="Convert historical data to TFRecord format")
+        parser.add_argument("--batch-size", type=int, default=32,
+                            help="Batch size for TFRecord datasets")
 
         args = parser.parse_args()
 
@@ -260,9 +378,22 @@ class UltimateDataFetcher:
                     args.resolution,
                     args.exchanges
                 )
-            else:  # live mode
+            elif args.mode == "live":
                 await fetcher.start_live_fetching(
                     markets=args.markets,
+                    resolution=args.resolution,
+                    exchanges=args.exchanges
+                )
+            elif args.convert_tfrecord:
+                # Convert historical data to TFRecord format
+                time_range = TimeRange(
+                    start=datetime.fromisoformat(args.start_date),
+                    end=datetime.fromisoformat(args.end_date)
+                )
+                
+                await fetcher.convert_historical_to_tfrecord(
+                    markets=args.markets,
+                    time_range=time_range,
                     resolution=args.resolution,
                     exchanges=args.exchanges
                 )

@@ -14,7 +14,14 @@
       "coinbase": {
         "timeframe": "5m",
         "since": null
-      }
+      },
+      "jupiter": {
+        "enabled": true,
+        "base_url": "https://api.jup.ag/swap/v1/swap",
+        "markets": "SOL-USDC",
+        "rate_limit": 10,
+        "credentials": {}
+     }
     },
     "backtest": {
       "initial_cash": 10000,

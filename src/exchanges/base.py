@@ -9,9 +9,9 @@ from typing import List, Dict, Optional, Union
 import aiohttp
 import asyncio
 
-from ..core.models import StandardizedCandle, ExchangeCredentials, TimeRange
-from ..core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
-from ..core.config import ExchangeConfig
+from core.models import StandardizedCandle, ExchangeCredentials, TimeRange
+from core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
+from core.config import ExchangeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -82,72 +82,17 @@ class BaseExchangeHandler(ABC):
         params: Optional[Dict] = None,
         headers: Optional[Dict] = None,
         data: Optional[Dict] = None,
-        timeout: int = 30
-    ) -> Dict:
-        """Make an HTTP request with rate limiting and error handling."""
+        timeout: int = 30,
+        as_json: bool = True
+    ) -> any:
+        """
+        Make an HTTP request with rate limiting and error handling.
+        
+        If as_json is True (default), the response is parsed as JSON.
+        If as_json is False, the raw text response is returned.
+        """
         if self._session is None:
             await self.start()
-
-        # Debug logging
-        #print(f"\nDEBUG REQUEST:")
-        #print(f"URL: {self.base_url}{endpoint}")
-        #print(f"Method: {method}")
-        #print(f"Params: {params}")
-        #print(f"Headers: {headers}")
-
-        try:
-            url = f"{self.base_url}{endpoint}"
-            async with self._session.request(
-                method=method,
-                url=url,
-                params=params,
-                headers=headers,
-                json=data,
-                timeout=timeout
-            ) as response:
-                #print(f"\nDEBUG RESPONSE:")
-                #print(f"Status: {response.status}")
-                
-                # Get response text
-                try:
-                    response_text = await response.text()
-                    #print(f"Response Text: {response_text}")
-                except:
-                    #print("Could not get response text")
-                    pass
-
-                if response.status == 401:
-                    #print("Got 401 Unauthorized!")
-                    error_text = await response.text()
-                    #print(f"Error details: {error_text}")
-                    raise ApiError(f"Unauthorized: {error_text}")
-
-                if response.status != 200:
-                    error_text = await response.text()
-                    #print(f"Error response: {error_text}")
-                    raise ApiError(f"coinbase API error: {response.status} - {error_text}")
-
-                # Try to parse JSON response
-                try:
-                    json_response = await response.json()
-                    #print(f"Parsed JSON: {json.dumps(json_response, indent=2)}")
-                    return json_response
-                except Exception as e:
-                    #print(f"Failed to parse JSON: {str(e)}")
-                    raise
-
-        except aiohttp.ClientError as e:
-            #print(f"Request failed with error: {str(e)}")
-            raise ExchangeError(f"Request failed: {str(e)}")
-        except asyncio.TimeoutError:
-            #print("Request timed out")
-            raise ExchangeError("Request timed out")
-        except Exception as e:
-            #print(f"Unexpected error: {str(e)}")
-            raise
-
-        # Rate limiting
-        await self._handle_rate_limit()
 
         try:
             url = f"{self.base_url}{endpoint}"
@@ -162,29 +107,27 @@ class BaseExchangeHandler(ABC):
                 # Update last request time
                 self._last_request_time = datetime.now().timestamp()
 
-                # Handle rate limiting
-                if response.status == 429:
-                    retry_after = int(response.headers.get('Retry-After', 30))
-                    raise RateLimitError(
-                        f"{self.name} rate limit exceeded. Retry after {retry_after} seconds"
-                    )
-
-                # Handle other errors
-                if response.status >= 400:
+                if response.status == 401:
                     error_text = await response.text()
-                    raise ApiError(
-                        f"{self.name} API error: {response.status} - {error_text}"
-                    )
+                    raise ApiError(f"Unauthorized: {error_text}")
 
-                return await response.json()
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise ApiError(f"{self.name} API error: {response.status} - {error_text}")
+
+                if as_json:
+                    try:
+                        return await response.json()
+                    except Exception as e:
+                        raise ApiError(f"Failed to parse JSON: {e}")
+                else:
+                    return await response.text()
 
         except aiohttp.ClientError as e:
-            raise ExchangeError(f"{self.name} request failed: {str(e)}")
+            raise ExchangeError(f"Request failed: {str(e)}")
         except asyncio.TimeoutError:
-            raise ExchangeError(f"{self.name} request timed out")
+            raise ExchangeError("Request timed out")
         except Exception as e:
-            if isinstance(e, (RateLimitError, ApiError, ExchangeError)):
-                raise
             raise ExchangeError(f"Unexpected error in {self.name}: {str(e)}")
 
     async def _handle_rate_limit(self):
@@ -210,15 +153,10 @@ class BaseExchangeHandler(ABC):
         Raises:
             ValidationError: If market is not supported by this exchange
         """
-        # First check if market is directly in the markets list (exchange-specific format)
         if market in self.markets:
             return
-        
-        # If not found directly, try checking if it can be converted from standard format
         if self.validate_standard_symbol(market):
             return
-            
-        # If we get here, the market is not supported
         raise ValidationError(f"Invalid market {market} for {self.name}")
 
     def validate_standard_symbol(self, standard_symbol: str) -> bool:
@@ -232,12 +170,8 @@ class BaseExchangeHandler(ABC):
             True if supported, False otherwise
         """
         self._init_symbol_mapper()
-        
-        # First, check if the symbol is already in the exchange's native format
         if standard_symbol in self.markets:
             return True
-            
-        # If not directly found, try to convert from standard format
         try:
             exchange_symbol = self._symbol_mapper.to_exchange_symbol(self.name, standard_symbol)
             return exchange_symbol in self.markets
@@ -245,14 +179,12 @@ class BaseExchangeHandler(ABC):
             return False
 
     def standardize_timestamp(self, ts: Union[int, float, str, datetime]) -> datetime:
-        """Convert various timestamp formats to datetime."""
         try:
             if isinstance(ts, datetime):
                 return ts
             elif isinstance(ts, str):
                 return datetime.fromisoformat(ts.replace('Z', '+00:00'))
             elif isinstance(ts, (int, float)):
-                # Handle milliseconds vs seconds
                 if len(str(int(ts))) > 10:
                     return datetime.fromtimestamp(ts / 1000)
                 return datetime.fromtimestamp(ts)
@@ -261,51 +193,25 @@ class BaseExchangeHandler(ABC):
             raise ValidationError(f"Failed to standardize timestamp: {str(e)}")
 
     def validate_candle(self, candle: StandardizedCandle):
-        """Validate candle data."""
         try:
             candle.validate()
         except ValidationError as e:
             raise ValidationError(f"Invalid candle data for {self.name}: {str(e)}")
 
     def format_timeframe(self, resolution: str) -> str:
-        """Format timeframe for exchange API."""
-        # Override in specific exchange handlers if needed
         return resolution
 
     def _init_symbol_mapper(self):
-        """Initialize the symbol mapper if not already set globally."""
-        from ..core.symbol_mapper import SymbolMapper
+        from core.symbol_mapper import SymbolMapper
         if not hasattr(self, '_symbol_mapper'):
-            # Create a new mapper instance if needed
             self._symbol_mapper = SymbolMapper()
-            
-            # Register known markets for this exchange
             if self.markets:
                 self._symbol_mapper.register_exchange(self.name, self.markets)
 
     def convert_to_exchange_symbol(self, standard_symbol: str) -> str:
-        """
-        Convert a standard symbol to this exchange's specific format.
-        
-        Args:
-            standard_symbol: Symbol in standard format (e.g., BTC-USD)
-            
-        Returns:
-            Symbol in exchange-specific format
-        """
         self._init_symbol_mapper()
         return self._symbol_mapper.to_exchange_symbol(self.name, standard_symbol)
 
     def convert_from_exchange_symbol(self, exchange_symbol: str) -> str:
-        """
-        Convert this exchange's symbol to standard format.
-        
-        Args:
-            exchange_symbol: Symbol in exchange-specific format
-            
-        Returns:
-            Symbol in standard format (e.g., BTC-USD)
-        """
         self._init_symbol_mapper()
         return self._symbol_mapper.from_exchange_symbol(self.name, exchange_symbol)
-

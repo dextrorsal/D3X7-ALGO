@@ -1,5 +1,6 @@
 import pandas as pd
 import talib
+from .macd import MACD
 from .base_indicator import BaseIndicator
 from src.core.config import Config
 

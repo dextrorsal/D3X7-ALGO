@@ -5,25 +5,25 @@ from .knn import knnStrategy
 from .base_indicator import BaseIndicator
 from src.core.config import Config
 
-class knn(BaseIndicator):
+class kNNIndicator(BaseIndicator):
     def __init__(self, config_path='config/indicator_settings.json'):
         """
-        Load config -> read "knn" -> pass short/long/base_neighbors 
+        Load config -> read "kNNIndicator" settings -> pass short/long/base_neighbors 
         into knnStrategy. If no config is found, fallback to defaults.
         """
         config = Config()
         # If config is None or fails, fallback to {}
         if not config or not isinstance(config, dict):
-            knn_config = {}
+            kNN_config = {}
         else:
-            knn_config = config.get("knn") or {}
+            kNN_config = config.get("kNNIndicator") or {}
 
-        # Defensive handling for each param
-        short_p = max(2, min(knn_config.get('short_period', 14), 50))
-        long_p = max(short_p + 1, min(knn_config.get('long_period', 28), 100))
-        base_n = max(3, min(knn_config.get('base_neighbors', 252), 252))
-        bar_t  = max(10, min(knn_config.get('bar_threshold', 300), 300))
-        vol_filter = knn_config.get('volatility_filter', False)
+        # Defensive handling for each parameter
+        short_p = max(2, min(kNN_config.get('short_period', 14), 50))
+        long_p = max(short_p + 1, min(kNN_config.get('long_period', 28), 100))
+        base_n = max(3, min(kNN_config.get('base_neighbors', 252), 252))
+        bar_t  = max(10, min(kNN_config.get('bar_threshold', 300), 300))
+        vol_filter = kNN_config.get('volatility_filter', False)
 
         self.model = knnStrategy(
             short_period=short_p,
@@ -35,9 +35,8 @@ class knn(BaseIndicator):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.Series:
         """
-        Produce a full -1/0/1 signals Series, 
-        by calling self.model.calculate(...) for each row i 
-        from [long_period + 10, ...].
+        Produce a full -1/0/1 signals Series by calling self.model.calculate(...) 
+        for each row from index [long_period + 10, ...].
         """
         signals = pd.Series(0, index=df.index, dtype=int)
 
@@ -58,6 +57,6 @@ class knn(BaseIndicator):
                 print(f"Error at index {i}: {str(e)}")
                 continue
 
-        # Forward-fill and fillna
+        # Forward-fill and fill any remaining NA values
         signals = signals.ffill().fillna(0)
         return signals

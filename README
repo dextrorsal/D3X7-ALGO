@@ -1,157 +1,206 @@
 # Crypto Data Fetcher
 
-**A Python-based framework for fetching, analyzing, and backtesting cryptocurrency trading strategies.**
+A high-performance framework for cryptocurrency data collection, analysis, and strategy backtesting across multiple exchanges.
 
-This project provides a comprehensive solution for acquiring, managing, and analyzing cryptocurrency market data from various exchanges. It enables you to develop, backtest, and optimize trading strategies using a variety of technical indicators and risk analysis tools.
+## 🌟 Features
 
-## Table of Contents
+- Multi-exchange support (Binance, Coinbase, Drift, Bitget)
+- Historical and real-time data collection
+- Advanced technical indicators and strategy backtesting
+- Standardized data models across exchanges
+- Comprehensive risk analysis tools
 
-- [Project Overview](#project-overview)
-- [Core Architecture](#core-architecture)
-- [Key Modules](#key-modules)
-    - [Exchange Handlers](#exchange-handlers)
-    - [Data Storage](#data-storage)
-    - [Technical Indicators](#technical-indicators)
-    - [Strategy Framework](#strategy-framework)
-    - [Backtesting Components](#backtesting-components)
-    - [CLI and Utilities](#cli-and-utilities)
-- [Use Cases](#use-cases)
-    - [Historical Data Collection](#historical-data-collection)
-    - [Strategy Backtesting](#strategy-backtesting)
-    - [Strategy Optimization](#strategy-optimization)
-    - [Live Data Monitoring](#live-data-monitoring)
-    - [Multi-Exchange Analysis](#multi-exchange-analysis)
-- [Setup and Installation](#setup-and-installation)
-    - [Prerequisites](#prerequisites)
-    - [Virtual Environment Setup](#virtual-environment-setup)
-    - [Installing Dependencies](#installing-dependencies)
-- [Running the CLI](#running-the-cli)
-    - [Historical Data Fetching](#historical-data-fetching)
-    - [Live Data Fetching](#live-data-fetching)
-- [Customization and Extension](#customization-and-extension)
-- [Contributing](#contributing)
-- [License](#license)
+## 📁 Project Structure
 
-## Project Overview
+```
+crypto_data_fetcher/
+├── src/
+│   ├── exchanges/          # Exchange-specific implementations
+│   │   └── base.py         # Base exchange handler interface
+│   ├── storage/            # Data storage implementations
+│   │   ├── raw.py          # Raw data storage
+│   │   ├── live.py         # Live data storage
+│   │   ├── tfrecord.py     # TFRecord utilities
+│   │   └── tfrecord_storage.py # TFRecord storage implementation
+│   ├── core/               # Core functionality and configurations
+│   │   ├── config.py       # Configuration management
+│   │   ├── models.py       # Data models
+│   │   ├── exceptions.py   # Custom exceptions
+│   │   └── symbol_mapper.py # Symbol mapping between exchanges
+│   ├── utils/              # Helper functions and utilities
+│   │   ├── improved_cli.py # Enhanced CLI interface
+│   │   ├── indicators/     # Technical indicators
+│   │   │   └── base_indicator.py # Base indicator class
+│   │   └── strategy/       # Strategy implementations
+│   │       └── base.py     # Base strategy class
+│   └── backtesting/        # Backtesting framework
+│       ├── backtester.py   # Core backtesting engine
+│       ├── optimizer.py    # Strategy parameter optimization
+│       └── risk_analysis.py # Monte Carlo simulation and risk analysis
+├── tests/                  # Test suite
+├── scripts/                # Utility scripts
+├── config/                 # Configuration files
+│   └── indicator_settings.json # Indicator configuration
+├── data/                   # Data files
+│   ├── historical/         # Historical data
+│   │   ├── raw/            # Raw historical data
+│   │   │   └── binance/    # Binance exchange data
+│   │   │       ├── BTCUSDT/ # Bitcoin/USDT pair
+│   │   │       │   ├── 1/  # 1-minute timeframe
+│   │   │       │   ├── 5/  # 5-minute timeframe
+│   │   │       │   └── 15/ # 15-minute timeframe
+│   │   │       └── SOLUSDT/ # Solana/USDT pair
+│   │   └── processed/      # Processed historical data
+│   └── live/               # Live data
+│       ├── raw/            # Raw live data
+│       └── processed/      # Processed live data
+├── logs/                   # Log files
+├── fetch.py                # Main entry point script
+├── requirements.txt        # Dependencies
+├── README.md               # Project documentation
+└── .gitignore              # Git ignore file
+```
 
-This project is designed to be a robust and flexible tool for cryptocurrency traders and analysts. It offers a wide range of features, including:
+### Key Components
 
-* **Multi-exchange support:** Fetch data from Binance, Coinbase, Drift, and Bitget.
-* **Historical and live data:** Acquire both historical and real-time market data.
-* **Standardized data models:** Consistent data representation across exchanges.
-* **Dual data storage:** Store both raw and processed (OHLCV) data.
-* **Technical analysis:** Implement and combine various technical indicators.
-* **Strategy backtesting:** Backtest strategies with realistic conditions (stop-loss, take-profit, commissions, slippage).
-* **Performance analysis:** Evaluate strategies with comprehensive metrics (Sharpe, Sortino, drawdowns).
-* **Risk analysis:** Use Monte Carlo simulations to assess risk.
-* **Command-line interface:** Easy-to-use CLI for all operations.
+- **exchanges/** - Exchange handlers with standardized interfaces
+  - `base.py` - Base exchange handler interface
+  - `binance.py`, `coinbase.py`, `drift.py`, `bitget.py` - Exchange-specific implementations
 
-## Core Architecture
+- **storage/** - Data storage implementations
+  - Raw data storage
+  - Processed OHLCV data
+  - Real-time data handling
+  - TFRecord support
 
-The project follows a modular architecture with distinct layers for data acquisition, storage, analysis, and backtesting. This ensures separation of concerns and facilitates extensibility.
+- **core/** - Core functionality
+  - Configuration management
+  - Error handling
+  - Rate limiting
 
-## Key Modules
+## 🚀 Quick Start
 
-### Exchange Handlers
-
-* `BinanceHandler`, `CoinbaseHandler`, `DriftHandler`, `BitgetHandler`
-* Implement a standardized interface for fetching data from different exchanges.
-* Handle symbol mapping, rate limiting, and error handling.
-
-### Data Storage
-
-* `RawDataStorage`: Stores original exchange data.
-* `ProcessedDataStorage`: Stores standardized OHLCV data.
-* `LiveDataStorage`: Handles real-time data storage.
-
-### Technical Indicators
-
-* `SupertrendIndicator`, `KNNIndicator`, `LogisticRegressionIndicator`, `LorentzianIndicator`, etc.
-* Provide implementations for various technical indicators.
-* Can be easily extended with new indicators.
-
-### Strategy Framework
-
-* `BaseStrategy`:  Defines the core strategy interface.
-* `MultiIndicatorStrategy`:  Combines multiple indicators with weights.
-
-### Backtesting Components
-
-* `Backtester`:  The main backtesting engine.
-* `Position` & `Portfolio`:  Track positions and manage the portfolio.
-* `BacktestResult`:  Stores backtest results.
-* `PerformanceAnalyzer`:  Calculates performance metrics.
-* `MonteCarloSimulator`:  Performs risk analysis.
-* `StrategyOptimizer`:  Optimizes strategy parameters.
-
-### CLI and Utilities
-
-* `improved_cli.py`:  Enhanced command-line interface for user interaction.
-* `logging.py` & `logging_wrapper.py`:  Logging utilities for debugging and monitoring.
-* `fetch.py`:  Main entry point for running the application.
-
-## Use Cases
-
-### Historical Data Collection
+### Prerequisites
 
 ```bash
-python fetch.py historical --days 7 --markets BTC-PERP ETH-PERP SOL-PERP --resolution 1D
-Strategy Backtesting
-Test trading strategies against historical data.
-Analyze performance with comprehensive metrics.
-Visualize equity curves and drawdowns.
-Strategy Optimization
-Find optimal parameters for strategies.
-Walk-forward testing for robustness.
-Monte Carlo simulations for risk assessment.
-Live Data Monitoring
-Bash
+# Python 3.11+ required
+python --version
 
-python fetch.py live --markets BTC-PERP ETH-PERP --resolution 15 --interval 30 
-Multi-Exchange Analysis
-Fetch and compare data from multiple exchanges.
-Standardize symbols across exchanges.
-Analyze discrepancies between markets.
-Setup and Installation
-Prerequisites
-Python 3.11 or higher
-pip package installer
-Virtual Environment Setup
-Navigate to the project directory:
-Bash
-
-cd /path/to/your/project
-Create a virtual environment:
-Bash
-
+# Create and activate virtual environment
 python -m venv venv
-Activate the virtual environment:
-On Windows: venv\Scripts\activate
-On macOS/Linux: source venv/bin/activate   
-Installing Dependencies
-Install TA-Lib (if needed):
-Windows (recommended): Download a pre-compiled wheel file and install it using pip install <wheel_file_name>.
-macOS/Linux: Try pip install TA-Lib. If it fails, you might need to install system-level dependencies.
-Install other dependencies:
-Bash
+source venv/bin/activate  # Unix
+venv\Scripts\activate     # Windows
 
+# Install dependencies
 pip install -r requirements.txt
-Running the CLI
-Historical Data Fetching
-Bash
+```
 
-python fetch.py historical --days <number_of_days> --markets <market_list> --resolution <resolution>
---days: Number of days of historical data to fetch.
---markets: Comma-separated list of markets (e.g., BTC-PERP,ETH-PERP).
---resolution: Data resolution (e.g., 1m, 5m, 1h, 1D).
-Live Data Fetching
-Bash
+### Basic Usage
 
-python fetch.py live --markets <market_list> --resolution <resolution> --interval <interval_seconds>
---markets: Comma-separated list of markets.
---resolution: Data resolution.
---interval: Interval in seconds between data fetches.
-Customization and Extension
-Adding Exchanges: Create a new module in src/exchanges/ implementing the exchange handler interface.
-Implementing Indicators: Add new indicators in src/utils/indicators/.
-Developing Strategies: Create new strategies in src/utils/strategy/.
+1. **Fetch Historical Data**
+```bash
+python fetch.py historical \
+    --exchange binance \
+    --markets BTC-USDT,ETH-USDT \
+    --resolution 1h \
+    --days 30
+```
+
+2. **Live Data Streaming**
+```bash
+python fetch.py live \
+    --exchange coinbase \
+    --markets BTC-USD,ETH-USD \
+    --resolution 1m \
+    --interval 60
+```
+
+3. **Run Backtesting**
+```bash
+python backtest.py \
+    --strategy supertrend \
+    --market BTC-USDT \
+    --timeframe 1D \
+    --capital 10000 \
+    --start-date 2023-01-01
+```
+
+### CLI Reference
+
+#### Historical Data Fetching
+```bash
+python fetch.py historical [OPTIONS]
+
+Options:
+  --exchange TEXT     Exchange name (binance/coinbase/drift/bitget)
+  --markets TEXT     Comma-separated market pairs
+  --resolution TEXT  Timeframe (1m/5m/15m/1h/4h/1D)
+  --days INTEGER    Number of days to fetch
+  --start-date TEXT Optional start date (YYYY-MM-DD)
+  --end-date TEXT   Optional end date (YYYY-MM-DD)
+```
+
+#### Live Data Streaming
+```bash
+python fetch.py live [OPTIONS]
+
+Options:
+  --exchange TEXT     Exchange name
+  --markets TEXT     Comma-separated market pairs
+  --resolution TEXT  Timeframe
+  --interval INTEGER Fetch interval in seconds
+```
+
+## 📊 Data Storage
+
+Data is stored in a structured format:
+```
+data/
+├── raw/
+│   ├── binance/
+│   ├── coinbase/
+│   └── drift/
+└── processed/
+    ├── ohlcv/
+    └── indicators/
+```
+
+## 🔧 Configuration
+
+Create a `config.yaml` in the project root:
+
+```yaml
+exchanges:
+  binance:
+    api_key: "your_api_key"
+    api_secret: "your_api_secret"
+  coinbase:
+    api_key: "your_api_key"
+    api_secret: "your_api_secret"
+
+storage:
+  base_path: "data/"
+  compression: true
+
+logging:
+  level: "INFO"
+  file: "crypto_fetcher.log"
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔗 Links
+
+- [Documentation](docs/README.md)
+- [Issue Tracker](https://github.com/yourusername/crypto-data-fetcher/issues)
+- [Change Log](CHANGELOG.md)

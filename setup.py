@@ -13,6 +13,21 @@ setup(
         "python-dotenv",
         "aiofiles",
     ],
+    extras_require={
+        "tensorflow": ["tensorflow>=2.6.0", "tensorflow-io>=0.21.0"],
+        "pytorch": ["torch>=1.9.0", "torchvision>=0.10.0"],
+        "solana": ["solana-py>=0.29.0", "anchorpy>=0.14.0"],
+        "drift": ["driftpy>=0.5.0; python_version >= '3.10'"],
+        "all": [
+            "tensorflow>=2.6.0", 
+            "tensorflow-io>=0.21.0",
+            "torch>=1.9.0", 
+            "torchvision>=0.10.0",
+            "solana-py>=0.29.0", 
+            "anchorpy>=0.14.0",
+            "driftpy>=0.5.0; python_version >= '3.10'"
+        ]
+    },
     # Commenting out entry_points until we resolve module structure
     # entry_points={
     #     "console_scripts": [

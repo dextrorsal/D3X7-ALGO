@@ -172,3 +172,27 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Project specific data directories
+/data/
+/test_data/
+/monte_carlo_results/
+/optimization_results/
+*.csv
+*.json
+*.db
+*.sqlite
+*.sqlite3
+
+# Sensitive information
+*.key
+*.pem
+*.crt
+.env
+credentials.json
+config.json
+
+# IDE specific
+.vscode/
+.idea/
+.cursor/

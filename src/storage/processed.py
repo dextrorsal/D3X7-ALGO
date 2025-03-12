@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from datetime import datetime, timedelta
-from src.core.config import StorageConfig  # Ensure the import path is correct
+from core.config import StorageConfig  # Ensure the import path is correct
 
 logger = logging.getLogger(__name__)
 

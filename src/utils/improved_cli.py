@@ -375,29 +375,26 @@ async def handle_backtest_mode(fetcher, args):
 
 
 def load_strategy(args):
-    """Load a trading strategy based on CLI arguments."""
     from src.utils.strategy.base import BaseStrategy
-    from src.strategy.multi_indicator_strategy import MultiIndicatorStrategy
-    
+    from src.utils.strategy.multi_indicator_strategy import MultiIndicatorStrategy
+
     config = {}
-    
-    # Add threshold to config if specified
     if args.threshold is not None:
         config["consensus_threshold"] = args.threshold
-    
-    # Load indicators
+
     indicators = []
+    # Use the global configuration file path (or hard-code the path)
+    config_file = "config/indicator_settings.json"
     for indicator_name in args.indicators:
-        indicator = load_indicator(indicator_name)
+        indicator = load_indicator(indicator_name, config_file=config_file)
         if indicator:
             indicators.append(indicator)
-    
+
     if not indicators:
         logger.warning("No valid indicators specified, using default Supertrend")
         from src.utils.indicators.wrapper_supertrend import SupertrendIndicator
-        indicators = [SupertrendIndicator(config_path=args.config_file)]
-    
-    # Create strategy based on name
+        indicators = [SupertrendIndicator(config_path=config_file)]
+
     if args.strategy.lower() == "multi_indicator":
         return MultiIndicatorStrategy(config=config, indicators=indicators, weights=args.weights)
     else:
@@ -405,35 +402,29 @@ def load_strategy(args):
         return MultiIndicatorStrategy(config=config, indicators=indicators, weights=args.weights)
 
 
-def load_indicator(indicator_name, settings=None):
-    """Load an indicator by name with optional configuration."""
+
+def load_indicator(indicator_name, config_file="config/indicator_settings.json"):
+    """Load an indicator by name with configuration from the given config file."""
     indicator_name = indicator_name.lower()
-    config_path = getattr(args, 'config_file', 'config/indicator_settings.json')
     
     if indicator_name == "supertrend":
         from src.utils.indicators.wrapper_supertrend import SupertrendIndicator
-        return SupertrendIndicator(config_path=config_path)
-    
+        return SupertrendIndicator(config_path=config_file)
     elif indicator_name == "rsi":
         from src.utils.indicators.wrapper_rsi import RsiIndicator
-        return RsiIndicator(config_path=config_path)
-    
+        return RsiIndicator(config_path=config_file)
     elif indicator_name == "macd":
         from src.utils.indicators.wrapper_macd import MacdIndicator
-        return MacdIndicator(config_path=config_path)
-    
+        return MacdIndicator(config_path=config_file)
     elif indicator_name == "knn":
-        from src.utils.indicators.wrapper_knn import KNNIndicator
-        return KNNIndicator(config_path=config_path)
-    
-    elif indicator_name == "logistic" or indicator_name == "logistic_regression":
+        from src.utils.indicators.wrapper_knn import kNNIndicator
+        return kNNIndicator(config_path=config_file)
+    elif indicator_name in ("logistic", "logistic_regression"):
         from src.utils.indicators.wrapper_logistic import LogisticRegressionIndicator
-        return LogisticRegressionIndicator(config_path=config_path)
-    
+        return LogisticRegressionIndicator(config_path=config_file)
     elif indicator_name == "lorentzian":
         from src.utils.indicators.wrapper_lorentzian import LorentzianIndicator
-        return LorentzianIndicator(config_path=config_path)
-    
+        return LorentzianIndicator(config_path=config_file)
     else:
         logger.warning(f"Unknown indicator: {indicator_name}")
         return None

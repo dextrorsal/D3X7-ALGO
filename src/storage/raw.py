@@ -7,9 +7,9 @@ import aiofiles
 import aiofiles.os
 import gzip
 
-from ..core.models import StandardizedCandle
-from ..core.exceptions import StorageError
-from ..core.config import StorageConfig
+from core.models import StandardizedCandle
+from core.exceptions import StorageError
+from core.config import StorageConfig
 
 logger = logging.getLogger(__name__)
 

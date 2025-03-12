@@ -9,9 +9,9 @@ import asyncio
 from datetime import datetime, timezone
 import json
 
-from .base import BaseExchangeHandler
-from ..core.models import StandardizedCandle, TimeRange
-from ..core.exceptions import ExchangeError, ValidationError, RateLimitError
+from exchanges.base import BaseExchangeHandler
+from core.models import StandardizedCandle, TimeRange
+from core.exceptions import ExchangeError, ValidationError, RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class CoinbaseHandler(BaseExchangeHandler):
         """Initialize Coinbase handler with configuration."""
         super().__init__(config)
         self.base_url = "https://api.coinbase.com"
+        self._available_markets = set()  # Cache for available markets
         # Updated to match Coinbase's exact granularity values
         self.timeframe_map = {
             "1": "ONE_MINUTE",
@@ -35,12 +36,54 @@ class CoinbaseHandler(BaseExchangeHandler):
         }
         logger.info("Initialized Coinbase handler with correct granularity mapping")
 
+    async def start(self):
+        """Start the handler and fetch initial market data."""
+        await super().start()
+        try:
+            # Fetch and cache available markets on startup
+            markets = await self.get_markets()
+            self._available_markets = set(markets)
+            logger.info(f"Cached {len(self._available_markets)} available markets")
+        except Exception as e:
+            logger.error(f"Failed to cache markets during startup: {e}")
+
+    def validate_market(self, market: str) -> bool:
+        """
+        Validate if a market symbol is available on Coinbase.
+        
+        Args:
+            market (str): Market symbol to validate (e.g., "BTC-USD", "SOL-PERP")
+            
+        Returns:
+            bool: True if market is valid, False otherwise
+        """
+        if not isinstance(market, str):
+            raise ValidationError("Market must be a string")
+        
+        # Convert market to Coinbase format
+        coinbase_market = self._convert_market_symbol(market)
+        
+        # First check if it's in our cached markets
+        if self._available_markets and coinbase_market in self._available_markets:
+            logger.debug(f"Market {coinbase_market} found in cache")
+            return True
+            
+        # If not in cache or cache is empty, try to refresh markets
+        try:
+            markets = asyncio.get_event_loop().run_until_complete(self.get_markets())
+            self._available_markets = set(markets)
+            return coinbase_market in self._available_markets
+        except Exception as e:
+            logger.error(f"Error validating market {market}: {e}")
+            # If we can't fetch markets, fall back to checking configured markets
+            return market in self.config.markets or coinbase_market in self.config.markets
+
     def _convert_market_symbol(self, market: str) -> str:
         """
         Convert internal market symbol to Coinbase format.
         Example: 
-        - SOL-PERP -> SOL-USD
-        - SOLUSDT -> SOL-USD
+            - SOL-PERP -> SOL-USD
+            - SOLUSDT -> SOL-USD
         """
         if not isinstance(market, str):
             raise ValidationError("Market must be a string")
@@ -92,13 +135,23 @@ class CoinbaseHandler(BaseExchangeHandler):
         time_range: TimeRange,
         resolution: str
     ) -> List[StandardizedCandle]:
-        """Fetch historical candle data from Coinbase public API."""
+        """
+        Fetch historical candle data from Coinbase public API.
+        
+        This implementation assumes the endpoint returns a JSON array of candle data,
+        as in your sample:
+        
+        [
+          {"timestamp": "2024-07-05T00:00:00", "market": "SOL-USD", "resolution": "15", 
+           "exchange": "coinbase", "raw_data": {...}},
+          ...
+        ]
+        """
         self.validate_market(market)
         coinbase_symbol = self._convert_market_symbol(market)
         granularity = self.timeframe_map.get(resolution)
         if not granularity:
             raise ValidationError(f"Invalid resolution: {resolution}")
-
         if time_range.end < time_range.start:
             raise ValidationError("End time must be after start time")
         
@@ -106,8 +159,7 @@ class CoinbaseHandler(BaseExchangeHandler):
         candles = []
         start_time = int(time_range.start.timestamp())
         end_time = int(time_range.end.timestamp())
-
-        empty_batch_counter = 0  # Counts consecutive empty batches
+        empty_batch_counter = 0
 
         try:
             while start_time < end_time:
@@ -120,8 +172,9 @@ class CoinbaseHandler(BaseExchangeHandler):
                     'end': str(current_end),
                     'granularity': granularity
                 }
-
+                
                 try:
+                    # Using the JSON _make_request here
                     response = await self._make_request(
                         method='GET',
                         endpoint=path,
@@ -137,48 +190,40 @@ class CoinbaseHandler(BaseExchangeHandler):
                     await asyncio.sleep(5)
                     continue
 
-                # Support both list response and dict with a 'candles' key
-                if isinstance(response, list):
+                # Expecting response to be a list of candle objects
+                if not response:
+                    logger.error("Empty response received from Coinbase")
+                    candle_list = []
+                elif isinstance(response, list):
                     candle_list = response
                 elif isinstance(response, dict) and 'candles' in response:
                     candle_list = response['candles']
                 else:
+                    logger.error(f"Unexpected response format: {response}")
                     candle_list = []
                 
                 if candle_list:
-                    empty_batch_counter = 0  # reset counter on receiving data
+                    empty_batch_counter = 0
                     for candle_data in candle_list:
                         try:
-                            # If candle_data is a list, assume the order:
-                            # [timestamp, open, high, low, close, volume]
-                            if isinstance(candle_data, list):
-                                candle = StandardizedCandle(
-                                    timestamp=self.standardize_timestamp(int(candle_data[0])),
-                                    open=float(candle_data[1]),
-                                    high=float(candle_data[2]),
-                                    low=float(candle_data[3]),
-                                    close=float(candle_data[4]),
-                                    volume=float(candle_data[5]),
-                                    source='coinbase',
-                                    resolution=resolution,
-                                    market=market,
-                                    raw_data=candle_data
-                                )
+                            # Expecting candle_data to be a dict with a timestamp key
+                            candle = StandardizedCandle(
+                                timestamp=self.standardize_timestamp(candle_data.get("timestamp")),
+                                open=float(candle_data["raw_data"].get("open", 0)),
+                                high=float(candle_data["raw_data"].get("high", 0)),
+                                low=float(candle_data["raw_data"].get("low", 0)),
+                                close=float(candle_data["raw_data"].get("close", 0)),
+                                volume=float(candle_data["raw_data"].get("volume", 0)),
+                                source='coinbase',
+                                resolution=resolution,
+                                market=market,
+                                raw_data=candle_data
+                            )
+                            candle_time = self.standardize_timestamp(candle.timestamp)
+                            if (time_range.start.replace(microsecond=0) <= candle_time.replace(microsecond=0) <= time_range.end.replace(microsecond=0)):
+                                candles.append(candle)
                             else:
-                                candle = StandardizedCandle(
-                                    timestamp=self.standardize_timestamp(int(candle_data['start'])),
-                                    open=float(candle_data['open']),
-                                    high=float(candle_data['high']),
-                                    low=float(candle_data['low']),
-                                    close=float(candle_data['close']),
-                                    volume=float(candle_data['volume']),
-                                    source='coinbase',
-                                    resolution=resolution,
-                                    market=market,
-                                    raw_data=candle_data
-                                )
-                            self.validate_candle(candle)
-                            candles.append(candle)
+                                logger.debug(f"Candle outside time range: {candle_time}")
                         except (KeyError, ValueError) as e:
                             logger.warning(f"Skipping invalid candle: {str(e)}")
                             continue
@@ -193,7 +238,7 @@ class CoinbaseHandler(BaseExchangeHandler):
                 start_time = current_end
                 await self._handle_rate_limit()
                 logger.debug(f"Processed batch up to {current_end}")
-                if len(candles) % 1000 == 0 and candles:
+                if candles and len(candles) % 1000 == 0:
                     logger.info(f"Fetched {len(candles)} candles so far for {market}")
 
         except Exception as e:
@@ -212,28 +257,20 @@ class CoinbaseHandler(BaseExchangeHandler):
 
         try:
             path = f'/api/v3/brokerage/market/products/{coinbase_symbol}/ticker'
-            params = {
-                'limit': 1
-            }
-
+            params = {'limit': 1}
             response = await self._make_request(
                 method='GET',
                 endpoint=path,
                 params=params,
                 headers=self._get_headers("GET", path)
             )
-
             if not response or 'trades' not in response:
                 raise ExchangeError(f"No live data available for {market}")
-
             trade_data = response['trades'][0]
-            # Updated time parsing to handle fractional seconds
             current_time = self.standardize_timestamp(
                 int(datetime.strptime(trade_data['time'], "%Y-%m-%dT%H:%M:%S.%fZ").timestamp())
             )
-
             price = float(trade_data['price'])
-
             candle = StandardizedCandle(
                 timestamp=current_time,
                 open=price,
@@ -250,7 +287,6 @@ class CoinbaseHandler(BaseExchangeHandler):
                     'best_ask': float(response['best_ask'])
                 }
             )
-
             self.validate_candle(candle)
             return candle
 
@@ -278,9 +314,10 @@ class CoinbaseHandler(BaseExchangeHandler):
                 endpoint='/api/v3/brokerage/market/products',
                 headers=self._get_headers("GET", "/api/v3/brokerage/market/products")
             )
-            
+            if response is None:
+                logger.error("No response received from Coinbase when fetching markets")
+                return []
             return [product['product_id'] for product in response.get('products', [])
                    if product.get('status') == 'online']
-            
         except Exception as e:
             raise ExchangeError(f"Failed to fetch markets: {e}")

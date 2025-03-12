@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
 import json
+import configparser
 
 from .exceptions import ConfigurationError
 from .models import ExchangeCredentials
@@ -67,6 +68,11 @@ class StorageConfig:
         if self.backup_enabled and self.backup_path:
             self.backup_path.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def tfrecord_path(self) -> Path:
+        """Path to TFRecord data."""
+        return self.historical_processed_path / "tfrecords"
+
 @dataclass
 class ExchangeConfig:
     """Configuration for an exchange."""
@@ -85,11 +91,26 @@ class LoggingConfig:
     console_logging: bool = True
     file_logging: bool = True
 
+class SolanaConfig:
+    """Configuration for Solana blockchain connections."""
+    
+    def __init__(self, config_dict=None):
+        """Initialize Solana configuration."""
+        config_dict = config_dict or {}
+        
+        # Get the full RPC URL from environment variable or config
+        self.rpc_url = os.environ.get('HELIUS_RPC_ENDPOINT', 
+                                     config_dict.get('rpc_url', 
+                                                    'https://api.mainnet-beta.solana.com'))
+            
+        self.commitment = config_dict.get('commitment', 'confirmed')
+        self.timeout = config_dict.get('timeout', 30)
+
 class Config:
     """Main configuration class."""
 
     def __init__(self, env_file: str = ".env", indicator_config_path: str = 'config/indicator_settings.json', 
-                 storage=None, exchanges=None, logging=None):
+                 storage=None, exchanges=None, logging=None, config_path=None):
         """
         Initialize configuration using environment variables from a .env file and additional JSON settings.
         Optionally, you can pass pre-built config objects for storage, exchanges, and logging.
@@ -106,55 +127,27 @@ class Config:
         self.exchanges = exchanges or self._init_exchange_configs()
         self.logging = logging or self._init_logging_config()
 
+        # Add Solana configuration
+        self.solana = SolanaConfig(config_dict=config_path)
+
     @classmethod
-    def from_ini(cls, ini_path: str = 'config.ini'):
-        """
-        Load configuration from an INI file.
-        (For dotenv usage, instantiate Config directly.)
-        """
-        import configparser
-        config_parser = configparser.ConfigParser()
-        config_parser.read(ini_path)
-
-        storage_config_dict = dict(config_parser['STORAGE']) if 'STORAGE' in config_parser else {}
-        exchanges_config_dict = {}
-        for section in config_parser.sections():
-            if section.startswith('EXCHANGE_'):
-                exchange_name = section.split('_')[1].lower()
-                exchanges_config_dict[exchange_name] = dict(config_parser[section])
-        logging_config_dict = dict(config_parser['LOGGING']) if 'LOGGING' in config_parser else {}
-
-        storage_config = StorageConfig(
-            raw_data_path=Path(storage_config_dict.get('raw_data_path', 'data/raw')),
-            processed_data_path=Path(storage_config_dict.get('processed_data_path', 'data/processed')),
-            use_compression=storage_config_dict.get('use_compression', 'false').lower() == 'true',
-            backup_enabled=storage_config_dict.get('backup_enabled', 'false').lower() == 'true',
-            backup_path=Path(storage_config_dict.get('backup_path', 'data/backup')) if storage_config_dict.get('backup_path') else None
-        )
-
-        exchange_configs = {}
-        for exchange_name, exchange_settings in exchanges_config_dict.items():
-            exchange_configs[exchange_name] = ExchangeConfig(
-                name=exchange_name,
-                credentials=ExchangeCredentials(
-                    api_key=exchange_settings.get('api_key'),
-                    api_secret=exchange_settings.get('api_secret')
-                ),
-                rate_limit=int(exchange_settings.get('rate_limit', '10')),
-                markets=exchange_settings.get('markets', '').split(','),
-                base_url=exchange_settings.get('base_url', ''),
-                enabled=exchange_settings.get('enabled', 'true').lower() == 'true'
-            )
-
-        logging_config = LoggingConfig(
-            log_level=logging_config_dict.get('log_level', 'INFO'),
-            log_file=Path(logging_config_dict.get('log_file', 'logs/data_fetcher.log')),
-            console_logging=logging_config_dict.get('console_logging', 'true').lower() == 'true',
-            file_logging=logging_config_dict.get('file_logging', 'true').lower() == 'true'
-        )
-
-        return cls(indicator_config_path='config/indicator_settings.json', 
-                   storage=storage_config, exchanges=exchange_configs, logging=logging_config)
+    def from_ini(cls, config_path: str = ".env"):
+        """Load configuration from INI file."""
+        config = configparser.ConfigParser()
+        config.read(config_path)
+        
+        # Create config dictionary
+        config_dict = {}
+        
+        # Add sections to config dictionary
+        for section in config.sections():
+            config_dict[section.lower()] = dict(config[section])
+        
+        # Add solana section if not present
+        if 'solana' not in config_dict:
+            config_dict['solana'] = {}
+            
+        return cls(config_dict)
 
     def _load_env(self, env_file: str = ".env"):
         """Load environment variables from .env file using python-dotenv."""
