@@ -5,7 +5,7 @@ from .knn import knnStrategy
 from .base_indicator import BaseIndicator
 from src.core.config import Config
 
-class kNNIndicator(BaseIndicator):
+class KNNIndicator(BaseIndicator):
     def __init__(self, config_path='config/indicator_settings.json'):
         """
         Load config -> read "kNNIndicator" settings -> pass short/long/base_neighbors 

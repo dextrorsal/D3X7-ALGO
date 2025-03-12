@@ -9,9 +9,9 @@ from typing import List, Dict, Optional, Union
 import aiohttp
 import asyncio
 
-from core.models import StandardizedCandle, ExchangeCredentials, TimeRange
-from core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
-from core.config import ExchangeConfig
+from src.core.models import StandardizedCandle, ExchangeCredentials, TimeRange
+from src.core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
+from src.core.config import ExchangeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class BaseExchangeHandler(ABC):
         return resolution
 
     def _init_symbol_mapper(self):
-        from core.symbol_mapper import SymbolMapper
+        from src.core.symbol_mapper import SymbolMapper
         if not hasattr(self, '_symbol_mapper'):
             self._symbol_mapper = SymbolMapper()
             if self.markets:

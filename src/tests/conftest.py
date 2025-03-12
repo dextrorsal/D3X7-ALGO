@@ -4,6 +4,8 @@ import pytest_asyncio
 import os
 import sys
 import asyncio
+from typing import List
+from pathlib import Path
 
 # Configure pytest-asyncio
 pytest_asyncio_config = {
@@ -12,12 +14,68 @@ pytest_asyncio_config = {
 }
 
 def pytest_configure(config):
-    """Configure matplotlib for non-interactive testing and register custom marks."""
+    """Configure test environment and register custom marks."""
     import matplotlib.pyplot as plt
-    # plt.ioff()  # Turn off interactive mode if desired
+    
+    # Register test categories
+    config.addinivalue_line("markers", "exchange: mark test as an exchange test")
+    config.addinivalue_line("markers", "backtest: mark test as a backtest")
+    config.addinivalue_line("markers", "integration: mark test as an integration test")
+    config.addinivalue_line("markers", "unit: mark test as a unit test")
+    config.addinivalue_line("markers", "performance: mark test as a performance test")
+    
+    # Register specific test types
     config.addinivalue_line("markers", "timeout: mark test with a timeout value in seconds")
     config.addinivalue_line("markers", "real_data: mark test that uses real exchange data")
     config.addinivalue_line("markers", "simple: mark test as 'simple'")
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Modify test collection:
+    1. Add markers based on test file location 
+    2. Skip real_data tests by default
+    3. Order tests by category
+    """
+    # Auto-mark tests based on their location/name
+    for item in items:
+        # Get the test file path relative to the tests directory
+        test_file = Path(item.fspath).relative_to(Path(item.fspath).parent.parent / "tests")
+        
+        # Auto-mark based on filename
+        if "test_exchanges" in str(test_file):
+            item.add_marker(pytest.mark.exchange)
+        elif "test_backtester" in str(test_file) or "test_real_data_backtest" in str(test_file):
+            item.add_marker(pytest.mark.backtest)
+        elif "test_integration" in str(test_file):
+            item.add_marker(pytest.mark.integration)
+        elif "test_performance" in str(test_file):
+            item.add_marker(pytest.mark.performance)
+        
+        # Mark all tests in test_core.py as unit tests
+        if "test_core" in str(test_file):
+            item.add_marker(pytest.mark.unit)
+
+    # Skip real_data tests by default unless --real-data flag is provided
+    if not config.getoption("--real-data"):
+        skip_real_data = pytest.mark.skip(reason="use --real-data to run")
+        for item in items:
+            if "real_data" in item.keywords:
+                item.add_marker(skip_real_data)
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--real-data",
+        action="store_true",
+        default=False,
+        help="run tests that use real exchange data"
+    )
+    parser.addoption(
+        "--category",
+        action="store",
+        default=None,
+        help="run tests of a specific category (exchange, backtest, integration, unit, performance)"
+    )
 
 @pytest.fixture(autouse=True)
 def close_figures():
@@ -25,16 +83,6 @@ def close_figures():
     yield
     import matplotlib.pyplot as plt
     plt.close('all')
-
-def pytest_collection_modifyitems(config, items):
-    """
-    Skip real_data tests by default, so you don't accidentally hit live endpoints.
-    Uncomment to enable skipping by default.
-    """
-    # skip_real_data = pytest.mark.skip(reason="real_data tests are disabled by default")
-    # for item in items:
-    #     if "real_data" in item.keywords:
-    #         item.add_marker(skip_real_data)
 
 @pytest_asyncio.fixture
 async def mock_processed_storage(tmp_path_factory):
@@ -134,3 +182,28 @@ async def mock_drift_handler():
     await handler.start()
     yield handler
     await handler.stop()
+
+# Add new fixtures for test categories
+@pytest.fixture
+def exchange_test_config():
+    """Configuration for exchange tests."""
+    from src.core.config import ExchangeConfig, ExchangeCredentials
+    
+    return ExchangeConfig(
+        name="test_exchange",
+        credentials=ExchangeCredentials(
+            api_key="test_key",
+            api_secret="test_secret",
+            additional_params={"passphrase": "test_passphrase"}
+        ),
+        rate_limit=10,
+        markets=["BTC-PERP", "ETH-PERP", "SOL-PERP", "BTC-USD", "ETH-USD", "SOL-USD"],
+        base_url="https://test.exchange.com",
+        enabled=True
+    )
+
+@pytest.fixture
+def backtest_config():
+    """Configuration for backtest."""
+    from src.core.config import Config
+    return Config()

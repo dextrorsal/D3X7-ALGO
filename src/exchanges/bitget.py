@@ -6,15 +6,23 @@ import logging
 import hmac
 import hashlib
 import time
-from typing import Union, List, Dict, Optional
-from datetime import datetime
+from typing import Union, List, Dict, Optional, Tuple
+from datetime import datetime, timezone, timedelta
 import asyncio
 import aiohttp
 from aiohttp.client_exceptions import ContentTypeError # Import ContentTypeError from aiohttp
-from .base import BaseExchangeHandler
-from ..core.models import StandardizedCandle, TimeRange
-from ..core.exceptions import ExchangeError, ValidationError, RateLimitError
 import json # Import json for debugging prints
+import pandas as pd
+import numpy as np
+from pybit.unified_trading import HTTP
+from src.core.models import StandardizedCandle, TimeRange
+from src.core.exceptions import ExchangeError, ValidationError, RateLimitError
+from src.exchanges.base import BaseExchangeHandler
+from src.utils.time_utils import (
+    convert_timestamp_to_datetime,
+    get_current_timestamp,
+    get_timestamp_from_datetime,
+)
 
 logger = logging.getLogger(__name__)
 

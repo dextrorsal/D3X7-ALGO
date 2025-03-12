@@ -8,9 +8,16 @@ from typing import List, Dict, Optional, Union
 import asyncio
 from datetime import datetime, timezone
 import json
+import pandas as pd
+import numpy as np
 
-from exchanges.base import BaseExchangeHandler
-from core.models import StandardizedCandle, TimeRange
+from src.core.models import StandardizedCandle, TimeRange
+from src.exchanges.base import BaseExchangeHandler
+from src.utils.time_utils import (
+    convert_timestamp_to_datetime,
+    get_current_timestamp,
+    get_timestamp_from_datetime,
+)
 from core.exceptions import ExchangeError, ValidationError, RateLimitError
 
 logger = logging.getLogger(__name__)
@@ -138,14 +145,13 @@ class CoinbaseHandler(BaseExchangeHandler):
         """
         Fetch historical candle data from Coinbase public API.
         
-        This implementation assumes the endpoint returns a JSON array of candle data,
-        as in your sample:
-        
-        [
-          {"timestamp": "2024-07-05T00:00:00", "market": "SOL-USD", "resolution": "15", 
-           "exchange": "coinbase", "raw_data": {...}},
-          ...
-        ]
+        Args:
+            market (str): Market symbol (e.g., "BTC-USD")
+            time_range (TimeRange): Time range to fetch data for
+            resolution (str): Candle resolution (e.g., "1", "5", "15", "60")
+            
+        Returns:
+            List[StandardizedCandle]: List of standardized candles
         """
         self.validate_market(market)
         coinbase_symbol = self._convert_market_symbol(market)
@@ -160,6 +166,7 @@ class CoinbaseHandler(BaseExchangeHandler):
         start_time = int(time_range.start.timestamp())
         end_time = int(time_range.end.timestamp())
         empty_batch_counter = 0
+        max_empty_batches = 3
 
         try:
             while start_time < end_time:
@@ -174,7 +181,6 @@ class CoinbaseHandler(BaseExchangeHandler):
                 }
                 
                 try:
-                    # Using the JSON _make_request here
                     response = await self._make_request(
                         method='GET',
                         endpoint=path,
@@ -190,61 +196,100 @@ class CoinbaseHandler(BaseExchangeHandler):
                     await asyncio.sleep(5)
                     continue
 
-                # Expecting response to be a list of candle objects
-                if not response:
-                    logger.error("Empty response received from Coinbase")
-                    candle_list = []
+                # Handle response format
+                candle_list = []
+                if isinstance(response, dict):
+                    if 'candles' in response:
+                        candle_list = response['candles']
+                    elif 'data' in response:
+                        candle_list = response['data']
+                    else:
+                        logger.warning(f"Unexpected response format: {response}")
                 elif isinstance(response, list):
                     candle_list = response
-                elif isinstance(response, dict) and 'candles' in response:
-                    candle_list = response['candles']
                 else:
-                    logger.error(f"Unexpected response format: {response}")
-                    candle_list = []
+                    logger.warning(f"Unexpected response type: {type(response)}")
                 
-                if candle_list:
-                    empty_batch_counter = 0
-                    for candle_data in candle_list:
-                        try:
-                            # Expecting candle_data to be a dict with a timestamp key
+                if not candle_list:
+                    empty_batch_counter += 1
+                    if empty_batch_counter >= max_empty_batches:
+                        logger.warning(f"Received {max_empty_batches} empty batches in a row, stopping.")
+                        break
+                    start_time = current_end
+                    continue
+                
+                empty_batch_counter = 0
+                for candle_data in candle_list:
+                    try:
+                        # Handle list format
+                        if isinstance(candle_data, list):
                             candle = StandardizedCandle(
-                                timestamp=self.standardize_timestamp(candle_data.get("timestamp")),
-                                open=float(candle_data["raw_data"].get("open", 0)),
-                                high=float(candle_data["raw_data"].get("high", 0)),
-                                low=float(candle_data["raw_data"].get("low", 0)),
-                                close=float(candle_data["raw_data"].get("close", 0)),
-                                volume=float(candle_data["raw_data"].get("volume", 0)),
+                                timestamp=datetime.fromtimestamp(float(candle_data[0]), tz=timezone.utc),
+                                open=float(candle_data[1]),
+                                high=float(candle_data[2]),
+                                low=float(candle_data[3]),
+                                close=float(candle_data[4]),
+                                volume=float(candle_data[5]),
                                 source='coinbase',
                                 resolution=resolution,
                                 market=market,
                                 raw_data=candle_data
                             )
-                            candle_time = self.standardize_timestamp(candle.timestamp)
-                            if (time_range.start.replace(microsecond=0) <= candle_time.replace(microsecond=0) <= time_range.end.replace(microsecond=0)):
-                                candles.append(candle)
+                        # Handle dictionary format
+                        elif isinstance(candle_data, dict):
+                            # Try different timestamp field names
+                            timestamp = None
+                            for field in ['time', 'timestamp', 'start']:
+                                if field in candle_data:
+                                    timestamp = candle_data[field]
+                                    break
+                            
+                            if timestamp is None:
+                                logger.warning(f"No timestamp found in candle data: {candle_data}")
+                                continue
+                            
+                            # Convert timestamp to datetime
+                            if isinstance(timestamp, str):
+                                try:
+                                    timestamp = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+                                except ValueError:
+                                    timestamp = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
                             else:
-                                logger.debug(f"Candle outside time range: {candle_time}")
-                        except (KeyError, ValueError) as e:
-                            logger.warning(f"Skipping invalid candle: {str(e)}")
+                                timestamp = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
+                            
+                            # Create standardized candle
+                            candle = StandardizedCandle(
+                                timestamp=timestamp,
+                                open=float(candle_data.get('open', 0.0)),
+                                high=float(candle_data.get('high', 0.0)),
+                                low=float(candle_data.get('low', 0.0)),
+                                close=float(candle_data.get('close', 0.0)),
+                                volume=float(candle_data.get('volume', 0.0)),
+                                source='coinbase',
+                                resolution=resolution,
+                                market=market,
+                                raw_data=candle_data
+                            )
+                        else:
+                            logger.warning(f"Unexpected candle data format: {type(candle_data)}")
                             continue
-                else:
-                    empty_batch_counter += 1
-                    logger.warning("Empty candle batch received; moving to next interval")
-                    if empty_batch_counter >= 5:
-                        logger.warning("Received 5 consecutive empty batches. Waiting an extra 5 seconds before continuing.")
-                        await asyncio.sleep(5)
-                        empty_batch_counter = 0
-
+                        
+                        candles.append(candle)
+                        
+                    except (ValueError, KeyError, TypeError) as e:
+                        logger.warning(f"Error parsing candle data: {e}")
+                        continue
+                
                 start_time = current_end
-                await self._handle_rate_limit()
-                logger.debug(f"Processed batch up to {current_end}")
-                if candles and len(candles) % 1000 == 0:
-                    logger.info(f"Fetched {len(candles)} candles so far for {market}")
+                await asyncio.sleep(0.1)  # Rate limiting
+            
+            # Sort candles by timestamp
+            candles.sort(key=lambda x: x.timestamp)
+            return candles
 
         except Exception as e:
+            logger.error(f"Error fetching historical candles: {e}")
             raise ExchangeError(f"Failed to fetch historical candles: {e}")
-
-        return sorted(candles, key=lambda x: x.timestamp)
 
     async def fetch_live_candles(
         self,
@@ -294,14 +339,15 @@ class CoinbaseHandler(BaseExchangeHandler):
             raise ExchangeError(f"Failed to fetch live data: {e}")
 
     def _get_granularity_seconds(self, resolution: str) -> int:
-        """Convert resolution to seconds for calculating time windows."""
+        """Convert resolution to seconds."""
         resolution_map = {
             "1": 60,
             "5": 300,
             "15": 900,
             "30": 1800,
             "60": 3600,
-            "240": 14400,
+            "120": 7200,
+            "360": 21600,
             "1D": 86400
         }
         return resolution_map.get(resolution, 60)

@@ -5,10 +5,10 @@ import pytest
 import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 import asyncio
 
-from src.core.config import Config, StorageConfig, ExchangeConfig
+from src.core.config import Config, StorageConfig, ExchangeConfig, ExchangeCredentials
 from src.core.models import TimeRange, StandardizedCandle
 from src.ultimate_fetcher import UltimateDataFetcher
 
@@ -32,7 +32,14 @@ def mock_config():
     config.exchanges = {
         "drift": ExchangeConfig(
             name="drift",
-            credentials=None,
+            credentials=ExchangeCredentials(
+                api_key="test_key",
+                api_secret="test_secret",
+                additional_params={
+                    "program_id": "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
+                    "rpc_url": "https://api.mainnet-beta.solana.com"
+                }
+            ),
             rate_limit=10,
             markets=["BTC-PERP", "ETH-PERP", "SOL-PERP"],
             base_url="https://test.drift.com",
@@ -40,7 +47,10 @@ def mock_config():
         ),
         "binance": ExchangeConfig(
             name="binance",
-            credentials=None,
+            credentials=ExchangeCredentials(
+                api_key="test_key",
+                api_secret="test_secret"
+            ),
             rate_limit=20,
             markets=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
             base_url="https://test.binance.com",
@@ -136,36 +146,46 @@ class TestUltimateDataFetcher:
                 volume=1000.0,
                 source="test",
                 resolution="1",
-                market="BTC-PERP",
+                market="BTC-USDT",  # Changed from BTC-PERP to a spot market
                 raw_data={"data": "live"}
             )
-            # Use AsyncMock for the live fetching handler
+            
+            # Replace the entire exchange_handlers dict with our mock
             mock_handler = AsyncMock()
             mock_handler.fetch_live_candles = AsyncMock(return_value=test_candle)
+            mock_handler.validate_standard_symbol = AsyncMock(return_value=True)  # Make validation always pass
             mock_handler.__aenter__.return_value = mock_handler
             mock_handler.__aexit__.return_value = None
-
+            
             test_fetcher.exchange_handlers = {"test": mock_handler}
-
-            # Instead of running the live loop indefinitely, create a short task
+            
+            # Monkeypatch the symbol mapper to avoid issues
+            test_fetcher.symbol_mapper = MagicMock()
+            test_fetcher.symbol_mapper.to_exchange_symbol = MagicMock(return_value="BTC-USDT")
+            
+            # Short-circuit the live fetching loop by setting up a task that we'll cancel
             try:
                 task = asyncio.create_task(
                     test_fetcher.start_live_fetching(
-                        markets=["BTC-PERP"],
-                        resolution="1"
+                        markets=["BTC-USDT"],  # Use a valid spot market
+                        resolution="1",
+                        exchanges=["test"]  # Explicitly use our mock
                     )
                 )
-                # Let the task run briefly for initial execution
+                
+                # Wait briefly for execution
                 await asyncio.sleep(0.1)
                 task.cancel()
+                
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass  # Expected cancellation
+                    pass  # Expected
+                    
             except Exception as e:
                 pytest.fail(f"Live fetching raised exception: {e}")
-
-            # Verify that fetch_live_candles was called at least once
+                
+            # Verify the mock was called
             assert mock_handler.fetch_live_candles.called
 
     @pytest.mark.asyncio

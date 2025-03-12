@@ -1,51 +1,44 @@
 """
 Exchange handlers package.
-Provides a unified interface to different cryptocurrency exchanges.
 """
+from typing import Optional, Type
 
-from types import SimpleNamespace
-from typing import Union, Dict, Type
-from exchanges.base import BaseExchangeHandler
-from exchanges.drift import DriftHandler
-from exchanges.binance import BinanceHandler
-from exchanges.coinbase import CoinbaseHandler
-from exchanges.jup import JupiterHandler  # Newly added Jupiter handler
-from core.exceptions import ExchangeError
+from .base import BaseExchangeHandler
+from .binance import BinanceHandler
+from .coinbase import CoinbaseHandler
+from .drift import DriftHandler
+from .jup import JupiterHandler
+from .bitget import BitgetHandler
 
-# Registry of available exchange handlers
-EXCHANGE_HANDLERS: Dict[str, Type[BaseExchangeHandler]] = {
-    'drift': DriftHandler,
-    'binance': BinanceHandler,
-    'coinbase': CoinbaseHandler,
-    'jupiter': JupiterHandler
-}
+__all__ = [
+    'BaseExchangeHandler',
+    'BinanceHandler',
+    'CoinbaseHandler',
+    'DriftHandler',
+    'JupiterHandler',
+    'BitgetHandler',
+    'get_exchange_handler'
+]
 
-def get_exchange_handler(config: Union[dict, 'ExchangeConfig']) -> BaseExchangeHandler:
+def get_exchange_handler(exchange_config) -> Optional[BaseExchangeHandler]:
     """
-    Factory function to get the appropriate exchange handler.
-    Automatically converts dictionary-based configs to objects.
+    Get the appropriate exchange handler instance based on the exchange config.
     
     Args:
-        config: Exchange configuration as a dict or object.
+        exchange_config (ExchangeConfig): Configuration for the exchange
         
     Returns:
-        Initialized exchange handler.
-        
-    Raises:
-        ExchangeError: If exchange is not supported.
+        Optional[BaseExchangeHandler]: Exchange handler instance if found, None otherwise
     """
-    # If config is a dictionary, convert it to an object with attribute access.
-    if isinstance(config, dict):
-        if "name" not in config:
-            raise ExchangeError("Exchange configuration must include a 'name' field.")
-        config = SimpleNamespace(**config)
+    exchange_map = {
+        'binance': BinanceHandler,
+        'coinbase': CoinbaseHandler,
+        'drift': DriftHandler,
+        'jupiter': JupiterHandler,
+        'bitget': BitgetHandler
+    }
     
-    handler_class = EXCHANGE_HANDLERS.get(config.name.lower())
-    if not handler_class:
-        raise ExchangeError(f"Unsupported exchange: {config.name}")
-        
-    return handler_class(config)
-
-def get_supported_exchanges() -> list:
-    return list(EXCHANGE_HANDLERS.keys())
-
+    handler_class = exchange_map.get(exchange_config.name.lower())
+    if handler_class:
+        return handler_class(exchange_config)
+    return None

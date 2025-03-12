@@ -83,6 +83,10 @@ class ExchangeConfig:
     base_url: str
     enabled: bool = True
 
+    def lower(self) -> str:
+        """Return the lowercase name of the exchange."""
+        return self.name.lower()
+
 @dataclass
 class LoggingConfig:
     """Configuration for logging."""
