@@ -164,10 +164,23 @@ class BinanceHandler(BaseExchangeHandler):
 
     def _setup_test_mode(self):
         """Set up test mode with mock data."""
-        # Mock markets are already initialized in __init__
+        # Set up mock markets with the expected structure
         self._is_test_mode = True
+        
+        # Create the mock_markets attribute with the expected structure
+        self.mock_markets = {
+            'spot': {
+                'standard_format': ['BTC-USDT', 'ETH-USDT', 'SOL-USDT'],
+                'exchange_format': self._mock_markets
+            },
+            'perp': {
+                'standard_format': ['BTC-PERP', 'ETH-PERP', 'SOL-PERP'],
+                'exchange_format': ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+            }
+        }
+        
         logger.info(f"Initialized test mode with {len(self._mock_markets)} mock markets")
-        return self._mock_markets
+        return self.mock_markets
 
     async def _initialize_client(self, retry_count: int = 0) -> None:
         """Initialize the Binance client with retry logic."""
