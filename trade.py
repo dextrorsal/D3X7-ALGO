@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 
 from src.core.config import Config
-from src.utils.logging import setup_logging
+from src.utils.log_setup import setup_logging
 from src.live.live_trader import LiveTrader
 from src.utils.indicators.wrapper_supertrend import SupertrendIndicator
 from src.utils.indicators.wrapper_logistic import LogisticRegressionIndicator

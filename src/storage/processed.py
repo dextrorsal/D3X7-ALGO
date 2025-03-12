@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from datetime import datetime, timedelta
-from core.config import StorageConfig  # Ensure the import path is correct
+from src.core.config import StorageConfig  # Ensure the import path is correct
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +21,47 @@ class ProcessedDataStorage:
         Store processed candles in CSV format.
         Files are stored under: processed_data/<exchange>/<market>/<resolution>/YYYY/MM/
         with filename YYYY-MM-DD.csv for each day.
+        
+        Args:
+            exchange: Exchange name
+            market: Market symbol
+            resolution: Candle resolution
+            candles: List of candles (either StandardizedCandle objects or dictionaries)
         """
         daily = {}
         for candle in candles:
-            date_str = candle.timestamp.strftime("%Y-%m-%d")
-            daily.setdefault(date_str, []).append({
-                "timestamp": candle.timestamp.isoformat(),
-                "open": candle.open,
-                "high": candle.high,
-                "low": candle.low,
-                "close": candle.close,
-                "volume": candle.volume
-            })
+            # Handle both StandardizedCandle objects and dictionaries
+            if hasattr(candle, 'timestamp'):
+                # It's a StandardizedCandle object
+                timestamp = candle.timestamp
+                candle_data = {
+                    "timestamp": candle.timestamp.isoformat(),
+                    "open": candle.open,
+                    "high": candle.high,
+                    "low": candle.low,
+                    "close": candle.close,
+                    "volume": candle.volume
+                }
+            else:
+                # It's a dictionary
+                if isinstance(candle['timestamp'], str):
+                    # Parse ISO format string to datetime
+                    timestamp = datetime.fromisoformat(candle['timestamp'].replace('Z', '+00:00'))
+                else:
+                    # Assume it's already a datetime
+                    timestamp = candle['timestamp']
+                candle_data = {
+                    "timestamp": candle['timestamp'] if isinstance(candle['timestamp'], str) else candle['timestamp'].isoformat(),
+                    "open": candle['open'],
+                    "high": candle['high'],
+                    "low": candle['low'],
+                    "close": candle['close'],
+                    "volume": candle['volume']
+                }
+                
+            date_str = timestamp.strftime("%Y-%m-%d")
+            daily.setdefault(date_str, []).append(candle_data)
+            
         for date_str, records in daily.items():
             year = date_str[0:4]
             month = date_str[5:7]

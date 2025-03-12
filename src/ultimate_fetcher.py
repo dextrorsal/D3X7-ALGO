@@ -15,7 +15,7 @@ from .core.exceptions import DataFetcherError
 from .exchanges import get_exchange_handler
 from .storage.raw import RawDataStorage
 from .storage.processed import ProcessedDataStorage
-from .utils.logging import setup_logging
+from .utils.log_setup import setup_logging
 from .core.symbol_mapper import SymbolMapper
 from .storage.live import LiveDataStorage
 

@@ -6,11 +6,13 @@ To run all tests in src/tests:
 ```bash
 cd /home/dex/ultimate_data_fetcher
 PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/tests/ -v -p no:anchorpy | cat
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/tests/ -v -p no:anchorpy | cat
 ```
 
 To run critical tests only (from src/critical_tests):
 ```bash
 PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest -v src/critical_tests/ -p no:anchorpy --tb=short | cat
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/critical_tests/ -v -p no:anchorpy | cat
 ```
 
 ## Test Overview 📊

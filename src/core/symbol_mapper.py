@@ -89,6 +89,47 @@ class SymbolMapper:
         self.supported_symbols[exchange_id].add(standard_symbol)
         
         logger.debug(f"Registered symbol {symbol} → {standard_symbol} for {exchange}")
+
+    def register_exchange(self, exchange: str, markets: List[str]) -> None:
+        """
+        Register all markets for an exchange.
+        
+        Args:
+            exchange: Exchange name
+            markets: List of market symbols in exchange format
+        """
+        exchange_id = exchange.lower()
+        
+        for market in markets:
+            try:
+                if exchange_id == "binance":
+                    # For Binance, extract base and quote from combined symbol
+                    for quote in self.QUOTE_CURRENCIES["binance"]:
+                        if market.endswith(quote):
+                            base = market[:-len(quote)]
+                            if base in self.SUPPORTED_ASSETS["binance"]:
+                                self.register_symbol(exchange, market, base, quote)
+                                break
+                
+                elif exchange_id == "coinbase":
+                    # For Coinbase, split on hyphen
+                    if "-" in market:
+                        base, quote = market.split("-")
+                        if base in self.SUPPORTED_ASSETS["coinbase"] and quote in self.QUOTE_CURRENCIES["coinbase"]:
+                            self.register_symbol(exchange, market, base, quote)
+                
+                elif exchange_id == "drift":
+                    # For Drift, handle both spot and perpetual
+                    if market.endswith("-PERP"):
+                        base = market[:-5]
+                        if base in self.SUPPORTED_ASSETS["drift"]:
+                            self.register_symbol(exchange, market, base, "PERP", True)
+                    elif market in self.SUPPORTED_ASSETS["drift"]:
+                        self.register_symbol(exchange, market, market, "USDC")
+            
+            except Exception as e:
+                logger.warning(f"Failed to register market {market} for {exchange}: {str(e)}")
+                continue
     
     def to_exchange_symbol(self, exchange_name: str, standard_symbol: str) -> str:
         """

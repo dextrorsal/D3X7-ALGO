@@ -18,7 +18,7 @@ from src.utils.time_utils import (
     get_current_timestamp,
     get_timestamp_from_datetime,
 )
-from core.exceptions import ExchangeError, ValidationError, RateLimitError
+from src.core.exceptions import ExchangeError, ValidationError, RateLimitError
 
 logger = logging.getLogger(__name__)
 

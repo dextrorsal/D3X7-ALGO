@@ -7,9 +7,9 @@ from typing import Dict, Type
 from enum import Enum
 from datetime import datetime
 
-from storage.raw import RawDataStorage
-from storage.processed import ProcessedDataStorage
-from core.config import StorageConfig
+from src.storage.raw import RawDataStorage
+from src.storage.processed import ProcessedDataStorage
+from src.core.config import StorageConfig
 import logging
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ STORAGE_HANDLERS: Dict[str, Type] = {
 
 # Optionally add TFRecord support
 try:
-    from storage.tfrecord_storage import TFRecordStorage
+    from src.storage.tfrecord_storage import TFRecordStorage
     STORAGE_HANDLERS[StorageType.TFRECORD] = TFRecordStorage
     HAS_TFRECORD = True
 except ImportError:

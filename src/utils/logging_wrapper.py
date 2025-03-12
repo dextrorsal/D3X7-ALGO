@@ -3,7 +3,7 @@ Wrapper for logging setup to provide compatibility with different logging config
 """
 
 import logging
-from ..utils.logging import setup_logging as original_setup_logging
+from ..utils.log_setup import setup_logging as original_setup_logging
 
 def enhanced_setup_logging(log_level=logging.INFO):
     """
