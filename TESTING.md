@@ -15,7 +15,7 @@ PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest -v src/critical_tests/ -p 
 
 ## Test Overview 📊
 
-Our test suite is divided into two main categories:
+Our test suite is divided into two main categories, aligned with our modular monolith architecture:
 
 ### 1. Critical Tests (src/critical_tests/)
 These tests focus on core functionality that must never break:
@@ -25,9 +25,9 @@ These tests focus on core functionality that must never break:
 - Critical data pipelines
 
 ### 2. Regular Tests (src/tests/)
-Our regular test suite contains 51 tests covering various components:
+Our regular test suite contains 60 tests covering various components:
 
-#### Exchange Tests (TestBinanceHandler)
+#### Exchange Tests (TestBinanceHandler, TestDriftHandler, TestCoinbaseHandler)
 - `test_market_symbol_conversion`: Validates correct symbol format conversion (BTC-USDT ↔ BTCUSDT)
 - `test_market_validation`: Ensures markets are properly validated in both formats
 - `test_get_markets`: Verifies market list retrieval and format consistency
@@ -47,18 +47,23 @@ Our regular test suite contains 51 tests covering various components:
 - `test_exchange_integration`: Validates multi-exchange compatibility
 - `test_strategy_execution`: Tests strategy implementation with live data
 
+#### Backtesting Tests
+- `test_backtest_with_mock_indicator`: Tests backtesting with mock indicators
+- `test_position_initialization`: Tests position initialization
+- `test_portfolio_initialization`: Tests portfolio initialization
+- `test_performance_metrics`: Tests performance metrics calculation
+
 ## Prerequisites 📋
 
 Make sure you have all required packages installed:
 ```bash
 pip install -r requirements.txt
 pip install python-binance  # For Binance tests
-pip install pybit          # For Bitget tests
 ```
 
 ## Test Structure 📁
 
-All tests are located in `src/tests/`. Here's what each test file covers:
+All tests are located in `src/tests/` and `src/critical_tests/`. Here's what each test file covers:
 
 - `test_exchanges.py` - Tests for exchange handlers (Binance, Coinbase, Drift, etc.)
 - `test_indicators.py` - Tests for technical indicators (KNN, RSI, MACD, etc.)
@@ -69,6 +74,7 @@ All tests are located in `src/tests/`. Here's what each test file covers:
 - `test_risk_analysis.py` - Risk analysis tools tests
 - `test_optimizer.py` - Strategy optimization tests
 - `test_backtesting_integration.py` - End-to-end backtesting tests
+- `test_symbol_mapper.py` - Symbol mapping tests
 
 ## Running Specific Tests 🎯
 
@@ -122,7 +128,7 @@ PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/tests/ --re
 3. **Missing Dependencies**
    - Install missing packages:
      ```bash
-     pip install python-binance pybit pytest-asyncio
+     pip install python-binance pytest-asyncio
      ```
 
 4. **Plugin Errors**
@@ -182,6 +188,103 @@ PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/tests/ --pd
 5. Handle cleanup in fixture teardown
 6. Use appropriate assertions
 7. Mock external services when possible
+8. Maintain alignment with the modular monolith architecture
+
+## Test Mode vs Live Mode 🔄
+
+Our tests support two modes:
+
+### Test Mode
+- Uses mock data for markets and candles
+- Supports both standard (BTC-USDT) and exchange (BTCUSDT) formats
+- Provides consistent test environment
+- No API keys required
+
+### Live Mode
+- Connects to real exchange APIs
+- Requires valid API credentials
+- Subject to rate limits
+- Tests real market conditions
+
+To run tests in live mode:
+```bash
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest src/tests/ --live-mode -v | cat
+```
+
+## Recent Updates (2024) 🆕
+
+### Symbol Mapping and Test Improvements
+
+We've made several important improvements to the testing framework and symbol handling:
+
+1. **Enhanced Symbol Mapper**
+   - Simplified the symbol mapper to focus on the three main exchanges: Binance, Coinbase, and Drift
+   - Added `register_symbol` method to replace the deprecated `register_exchange` method
+   - Improved symbol conversion between different exchange formats
+   - Fixed market symbol conversion for standard formats (BTC-USDT) to exchange-specific formats (BTCUSDT)
+
+2. **Test Suite Enhancements**
+   - Added CLI option to specify market format for tests (`--market-format`)
+   - Updated critical tests to support different exchange symbol formats
+   - Fixed MockBinanceHandler to use the new symbol mapper methods
+   - Ensured compatibility between critical tests and regular tests
+   - Improved test mocking to use appropriate methods based on test mode
+
+3. **Binance Handler Improvements**
+   - Enhanced market validation to work in both test and live modes
+   - Improved symbol conversion to handle various input formats
+   - Added test mode with mock markets for testing without API access
+   - Fixed historical and live data fetching in test mode
+
+4. **Test Mode Support**
+   - Added ability to force handlers into test mode for reliable testing
+   - Implemented mock data generation for candles and market information
+   - Ensured consistent behavior across different test environments
+
+These changes ensure that our tests are more reliable, easier to run, and better at catching potential issues before they affect production code.
+
+### Running Tests with Specific Market Formats
+
+You can now run tests with a specific market format using the `--market-format` option:
+
+```bash
+# Run tests with Binance market format
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest src/critical_tests/ -p no:anchorpy --market-format=binance
+
+# Run tests with Coinbase market format
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest src/critical_tests/ -p no:anchorpy --market-format=coinbase
+
+# Run tests with Drift market format
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest src/critical_tests/ -p no:anchorpy --market-format=drift
+```
+
+This makes it easier to test specific exchange integrations without having to modify the test code.
+
+## Architectural Alignment
+
+Our test suite is designed to maintain the integrity of our modular monolith architecture:
+
+1. **Data Acquisition Layer Tests**
+   - Exchange handler tests ensure proper market data fetching
+   - Symbol mapping tests validate correct format conversion
+   - Mock handlers provide reliable testing environments
+
+2. **Transformation Pipeline Tests**
+   - Data standardization tests ensure consistent formats
+   - Storage tests validate data persistence and retrieval
+   - Processing tests check data transformation accuracy
+
+3. **Strategy Composition Layer Tests**
+   - Indicator tests validate technical analysis calculations
+   - Strategy tests ensure proper signal generation
+   - Backtesting tests verify strategy performance
+
+4. **Execution Layer Tests**
+   - Order execution tests validate trade placement
+   - Risk management tests ensure proper position sizing
+   - Performance tests measure trading outcomes
+
+By maintaining this test structure, we ensure that each architectural layer maintains its integrity while properly integrating with adjacent layers.
 
 ## Need Help? 🆘
 

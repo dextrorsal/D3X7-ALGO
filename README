@@ -1,44 +1,72 @@
-# Crypto Data Fetcher
+# Ultimate Data Fetcher
 
-A high-performance framework for cryptocurrency data collection, analysis, and strategy backtesting across multiple exchanges.
+A high-performance framework for cryptocurrency data collection, analysis, and strategy backtesting across multiple exchanges, built with a modular monolith architecture.
 
 ## 🌟 Features
 
-- Multi-exchange support (Binance, Coinbase, Drift, Bitget)
-- Historical and real-time data collection
+- Multi-exchange support (Binance, Coinbase, Drift)
+- Historical and real-time data collection with standardized formats
 - Advanced technical indicators and strategy backtesting
 - Standardized data models across exchanges
 - Comprehensive risk analysis tools
+- Modular architecture with clear separation of concerns
+- Enhanced symbol mapping between exchanges
+- Test mode support for reliable testing without API access
+
+## 🏗️ Architecture
+
+The Ultimate Data Fetcher follows a modular monolith architecture with clear separation between components:
+
+1. **Data Acquisition Layer**: Exchange handlers implement standardized interfaces for various exchanges with resilient error handling and rate limiting
+2. **Transformation Pipeline**: Standardization of candle data across diverse exchange formats enables unified downstream processing
+3. **Strategy Composition Layer**: Indicator framework allows for algorithm composition and backtest evaluation
+4. **Execution Layer**: Trade execution is separated from signal generation, following industry best practices
+
+This architecture provides an optimal balance between architectural cleanliness and development velocity.
 
 ## 📁 Project Structure
 
 ```
-crypto_data_fetcher/
+ultimate_data_fetcher/
 ├── src/
 │   ├── exchanges/          # Exchange-specific implementations
-│   │   └── base.py         # Base exchange handler interface
+│   │   ├── base.py         # Base exchange handler interface
+│   │   ├── binance.py      # Binance exchange handler
+│   │   ├── binance_mock.py # Mock Binance handler for testing
+│   │   ├── coinbase.py     # Coinbase exchange handler
+│   │   ├── drift.py        # Drift exchange handler
+│   │   └── drift_mock.py   # Mock Drift handler for testing
 │   ├── storage/            # Data storage implementations
 │   │   ├── raw.py          # Raw data storage
+│   │   ├── processed.py    # Processed data storage
 │   │   ├── live.py         # Live data storage
 │   │   ├── tfrecord.py     # TFRecord utilities
-│   │   └── tfrecord_storage.py # TFRecord storage implementation
+│   │   └── __init__.py     # Storage initialization
 │   ├── core/               # Core functionality and configurations
 │   │   ├── config.py       # Configuration management
 │   │   ├── models.py       # Data models
 │   │   ├── exceptions.py   # Custom exceptions
 │   │   └── symbol_mapper.py # Symbol mapping between exchanges
 │   ├── utils/              # Helper functions and utilities
-│   │   ├── improved_cli.py # Enhanced CLI interface
+│   │   ├── time_utils.py   # Time-related utilities
 │   │   ├── indicators/     # Technical indicators
-│   │   │   └── base_indicator.py # Base indicator class
+│   │   │   ├── base_indicator.py # Base indicator class
+│   │   │   ├── supertrend.py     # Supertrend indicator
+│   │   │   ├── knn.py           # K-Nearest Neighbors indicator
+│   │   │   └── lorentzian.py    # Lorentzian classifier
 │   │   └── strategy/       # Strategy implementations
 │   │       └── base.py     # Base strategy class
-│   └── backtesting/        # Backtesting framework
-│       ├── backtester.py   # Core backtesting engine
-│       ├── optimizer.py    # Strategy parameter optimization
-│       └── risk_analysis.py # Monte Carlo simulation and risk analysis
-├── tests/                  # Test suite
-├── scripts/                # Utility scripts
+│   ├── backtesting/        # Backtesting framework
+│   │   ├── backtester.py   # Core backtesting engine
+│   │   ├── optimizer.py    # Strategy parameter optimization
+│   │   └── risk_analysis.py # Monte Carlo simulation and risk analysis
+│   ├── critical_tests/     # Critical functionality tests
+│   │   └── test_critical_functionality.py # Critical tests
+│   └── tests/              # Regular test suite
+│       ├── test_exchanges.py      # Exchange handler tests
+│       ├── test_symbol_mapper.py  # Symbol mapper tests
+│       ├── test_core.py           # Core functionality tests
+│       └── test_backtester.py     # Backtesting tests
 ├── config/                 # Configuration files
 │   └── indicator_settings.json # Indicator configuration
 ├── data/                   # Data files
@@ -57,15 +85,17 @@ crypto_data_fetcher/
 ├── logs/                   # Log files
 ├── fetch.py                # Main entry point script
 ├── requirements.txt        # Dependencies
-├── README.md               # Project documentation
-└── .gitignore              # Git ignore file
+├── TESTING.md              # Testing documentation
+├── module-structure.md     # Architecture documentation
+└── README                  # Project documentation
 ```
 
 ### Key Components
 
 - **exchanges/** - Exchange handlers with standardized interfaces
   - `base.py` - Base exchange handler interface
-  - `binance.py`, `coinbase.py`, `drift.py`, `bitget.py` - Exchange-specific implementations
+  - `binance.py`, `coinbase.py`, `drift.py` - Exchange-specific implementations
+  - `binance_mock.py`, `drift_mock.py` - Mock handlers for testing
 
 - **storage/** - Data storage implementations
   - Raw data storage
@@ -77,6 +107,12 @@ crypto_data_fetcher/
   - Configuration management
   - Error handling
   - Rate limiting
+  - Symbol mapping
+
+- **backtesting/** - Backtesting framework
+  - Backtesting engine
+  - Strategy optimization
+  - Risk analysis
 
 ## 🚀 Quick Start
 
@@ -132,7 +168,7 @@ python backtest.py \
 python fetch.py historical [OPTIONS]
 
 Options:
-  --exchange TEXT     Exchange name (binance/coinbase/drift/bitget)
+  --exchange TEXT     Exchange name (binance/coinbase/drift)
   --markets TEXT     Comma-separated market pairs
   --resolution TEXT  Timeframe (1m/5m/15m/1h/4h/1D)
   --days INTEGER    Number of days to fetch
@@ -177,6 +213,8 @@ exchanges:
   coinbase:
     api_key: "your_api_key"
     api_secret: "your_api_secret"
+  drift:
+    program_id: "your_program_id"
 
 storage:
   base_path: "data/"
@@ -184,7 +222,24 @@ storage:
 
 logging:
   level: "INFO"
-  file: "crypto_fetcher.log"
+  file: "ultimate_data_fetcher.log"
+```
+
+## 🧪 Testing
+
+The project includes a comprehensive test suite with both regular and critical tests. See [TESTING.md](TESTING.md) for detailed information on running tests.
+
+Quick test commands:
+
+```bash
+# Run all tests
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src python3 -m pytest src/tests/ -v -p no:anchorpy | cat
+
+# Run critical tests
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest -v src/critical_tests/ -p no:anchorpy --tb=short | cat
+
+# Run tests with specific market format
+PYTHONPATH=/home/dex/ultimate_data_fetcher/src pytest src/critical_tests/ -p no:anchorpy --market-format=binance
 ```
 
 ## 🤝 Contributing
