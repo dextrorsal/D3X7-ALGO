@@ -225,11 +225,17 @@ class TestCriticalExchangeFunctionality:
     async def test_binance_connectivity(self, mock_config, test_markets):
         """Test basic Binance connection and market data fetching."""
         try:
-            async with BinanceHandler(mock_config) as handler:
-                # Enable test mode first
-                handler._is_test_mode = True
-                handler._setup_test_mode()
-                
+            # Create handler but don't connect yet
+            handler = BinanceHandler(mock_config)
+            
+            # Enable test mode BEFORE connecting
+            handler._is_test_mode = True
+            handler._setup_test_mode()
+            
+            # Now connect with test mode already enabled
+            await handler.start()
+            
+            try:
                 # Test market data fetching
                 markets = await handler.get_markets()
                 print(f"✅ Found {len(markets)} markets")
@@ -244,6 +250,9 @@ class TestCriticalExchangeFunctionality:
                     assert len(markets) > 0, "No markets returned"
                 
                 print("✅ Binance connectivity test passed")
+            finally:
+                # Make sure we clean up
+                await handler.stop()
                 
         except Exception as e:
             print(f"❌ Binance connectivity test failed: {str(e)}")
@@ -280,11 +289,17 @@ class TestCriticalExchangeFunctionality:
     async def test_live_data_fetching(self, mock_config, test_markets):
         """Test live data fetching."""
         try:
-            async with BinanceHandler(mock_config) as handler:
-                # Enable test mode
-                handler._is_test_mode = True
-                handler._setup_test_mode()
-                
+            # Create handler but don't connect yet
+            handler = BinanceHandler(mock_config)
+            
+            # Enable test mode BEFORE connecting
+            handler._is_test_mode = True
+            handler._setup_test_mode()
+            
+            # Now connect with test mode already enabled
+            await handler.start()
+            
+            try:
                 # Test live data fetching for each market
                 for market in test_markets["spot"]:
                     candle = await handler.fetch_live_candles(
@@ -295,6 +310,9 @@ class TestCriticalExchangeFunctionality:
                     print(f"✅ Live data fetched for {market}")
                 
                 print("✅ Live data fetching test passed")
+            finally:
+                # Make sure we clean up
+                await handler.stop()
                 
         except Exception as e:
             print(f"❌ Live data fetching test failed: {str(e)}")

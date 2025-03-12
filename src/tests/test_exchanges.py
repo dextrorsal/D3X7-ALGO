@@ -58,7 +58,14 @@ async def binance_handler():
         enabled=True
     )
     handler = BinanceHandler(config)
-    await handler.start()  # Initialize the handler
+    
+    # Enable test mode BEFORE connecting
+    handler._is_test_mode = True
+    handler._setup_test_mode()
+    
+    # Now connect with test mode already enabled
+    await handler.start()
+    
     yield handler
     await handler.stop()
 
