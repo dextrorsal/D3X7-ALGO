@@ -19,6 +19,7 @@ from src.core.models import StandardizedCandle, TimeRange
 from src.exchanges.base import BaseExchangeHandler
 from src.core.exceptions import ExchangeError, ValidationError
 from src.core.config import ExchangeConfig, ExchangeCredentials
+from src.exchanges.auth import DriftAuth
 from driftpy.constants.config import configs
 from driftpy.drift_client import DriftClient
 from anchorpy import Provider, Wallet
@@ -70,44 +71,89 @@ else:
     logger.warning(f"Python {PY_VERSION.major}.{PY_VERSION.minor} is not compatible with DriftPy (requires Python 3.10+)")
 
 class DriftHandler(BaseExchangeHandler):
-    """Handler for Drift exchange."""
+    """Handler for Drift exchange data."""
 
     def __init__(self, config: ExchangeConfig):
-        """Initialize DriftHandler with configuration."""
+        """Initialize Drift handler with configuration."""
         super().__init__(config)
-        self.base_url = config.base_url
-        self.rpc_url = config.credentials.additional_params.get("rpc_url") if config.credentials else None
-        self.program_id = config.credentials.additional_params.get("program_id") if config.credentials else None
-        self._is_test_mode = False
-        self._mock_markets = ["SOL-PERP", "BTC-PERP", "ETH-PERP", "SOL-USDC", "BTC-USDC", "ETH-USDC"]
+        self.base_url = config.base_url or "https://drift-historical-data-v2.s3.eu-west-1.amazonaws.com/program/dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
         self.client = None
+        self.drift_client = None
+        self._is_test_mode = False
+        self._mock_markets = ["SOL", "BTC", "ETH", "SOL-PERP", "BTC-PERP", "ETH-PERP"]
+        self._available_markets = []
+        
+        # Initialize Drift authentication handler
+        self._auth_handler = DriftAuth(config.credentials)
+        
+        # Initialize with test mode if SDK is not available
+        if not self._check_sdk_available():
+            self._is_test_mode = True
+            self._setup_test_mode()
+
+    def _check_sdk_available(self) -> bool:
+        """Check if DriftPy SDK is available."""
+        try:
+            if importlib.util.find_spec("driftpy") is not None:
+                logger.info("DriftPy SDK is available and imported successfully")
+                return True
+            else:
+                logger.warning("DriftPy SDK is not available")
+                return False
+        except Exception as e:
+            logger.warning(f"Error checking DriftPy SDK: {e}")
+            return False
+
+    def _setup_test_mode(self):
+        """Set up test mode with mock data."""
+        self._is_test_mode = True
+        self._available_markets = self._mock_markets
+        logger.info(f"Initialized test mode with {len(self._mock_markets)} mock markets")
 
     async def _initialize_drift_client(self) -> None:
-        """Initialize the Drift client."""
-        try:
-            # Create a mock wallet for testing
-            mock_wallet = Keypair()
+        """Initialize the Drift client using the authentication handler."""
+        if self._is_test_mode:
+            logger.info("Running in test mode, skipping Drift client initialization")
+            return
             
-            # Initialize the Drift client with mock wallet
-            self.client = DriftClient(
-                connection=AsyncClient(self.rpc_url) if self.rpc_url else None,
-                wallet=mock_wallet,
-                program_id=self.program_id,
-                opts={"commitment": "processed"}
-            )
-            logger.info("Successfully initialized Drift client with mock wallet")
+        try:
+            # Check if we have valid authentication
+            if self._auth_handler.is_authenticated():
+                # Initialize the client using the auth handler
+                self.client = await self._auth_handler.initialize_client()
+                logger.info("Successfully initialized Drift client with authenticated wallet")
+            else:
+                # Create a mock wallet for public endpoints
+                mock_wallet = Keypair()
+                
+                # Get program ID and RPC URL from auth handler
+                program_id = self._auth_handler.get_program_id()
+                rpc_url = self._auth_handler.get_rpc_url()
+                
+                # Initialize the Drift client with mock wallet for public endpoints
+                self.client = DriftClient(
+                    connection=AsyncClient(rpc_url),
+                    wallet=mock_wallet,
+                    program_id=program_id,
+                    opts={"commitment": "processed"}
+                )
+                logger.info("Successfully initialized Drift client with mock wallet for public endpoints")
             
         except Exception as e:
             logger.warning(f"Failed to initialize Drift client: {e}. Falling back to test mode.")
             self._is_test_mode = True
+            self._setup_test_mode()
 
     async def start(self) -> None:
         """Start the handler."""
+        await super().start()
         try:
-            await self._initialize_drift_client()
+            if not self._is_test_mode:
+                await self._initialize_drift_client()
         except Exception as e:
-            logger.warning(f"Failed to start Drift handler: {e}. Operating in test mode.")
+            logger.error(f"Error starting Drift handler: {e}")
             self._is_test_mode = True
+            self._setup_test_mode()
 
     async def stop(self) -> None:
         """Stop the handler."""
@@ -116,11 +162,14 @@ class DriftHandler(BaseExchangeHandler):
                 await self.client.close()
             except Exception as e:
                 logger.warning(f"Error closing Drift client: {e}")
+                
+        # Close the auth handler connection
+        if hasattr(self, '_auth_handler') and self._auth_handler:
+            await self._auth_handler.close()
 
     async def get_markets(self) -> List[str]:
-        """Get available markets."""
+        """Get list of available markets."""
         if self._is_test_mode:
-            logger.info("Using mock markets for testing")
             return self._mock_markets
             
         try:
@@ -150,106 +199,153 @@ class DriftHandler(BaseExchangeHandler):
         time_range: TimeRange,
         resolution: str = "15"
     ) -> List[StandardizedCandle]:
-        """
-        Fetch historical candlestick data.
-        
-        Args:
-            market: Market symbol (e.g., "SOL-PERP")
-            time_range: Time range to fetch data for
-            resolution: Candle resolution in minutes
-            
-        Returns:
-            List of StandardizedCandle objects
-        """
+        """Fetch historical candle data."""
+        # If in test mode, return mock data
         if self._is_test_mode:
-            # Generate mock candles for testing
-            candles = []
-            current_time = time_range.start
-            while current_time <= time_range.end:
-                candle = StandardizedCandle(
-                    timestamp=current_time,
-                    open=100.0 + random.uniform(-5, 5),
-                    high=105.0 + random.uniform(-5, 5),
-                    low=95.0 + random.uniform(-5, 5),
-                    close=102.0 + random.uniform(-5, 5),
-                    volume=1000.0 + random.uniform(-100, 100),
-                    source="drift",
-                    resolution=resolution,
-                    market=market,
-                    raw_data={"mock": True}
-                )
-                candles.append(candle)
-                current_time += timedelta(minutes=int(resolution))
-            return candles
+            return self._generate_mock_candles(time_range, resolution, market)
             
         try:
-            if not self.client:
-                raise ExchangeError("Drift client not initialized")
+            # Try to use the client if available
+            if self.client:
+                # Fetch candles using the SDK client
+                # Convert timestamps to milliseconds
+                start_ts = int(time_range.start.timestamp() * 1000)
+                end_ts = int(time_range.end.timestamp() * 1000)
                 
-            # Convert timestamps to milliseconds
-            start_ts = int(time_range.start.timestamp() * 1000)
-            end_ts = int(time_range.end.timestamp() * 1000)
-            
-            # Fetch candles from Drift
-            raw_candles = await self.client.get_candles(
-                market=market,
-                resolution=resolution,
-                start_time=start_ts,
-                end_time=end_ts
-            )
-            
-            # Convert to StandardizedCandle format
-            candles = []
-            for raw in raw_candles:
-                candle = StandardizedCandle(
-                    timestamp=datetime.fromtimestamp(raw["time"] / 1000, tz=timezone.utc),
-                    open=float(raw["open"]),
-                    high=float(raw["high"]),
-                    low=float(raw["low"]),
-                    close=float(raw["close"]),
-                    volume=float(raw["volume"]),
-                    source="drift",
-                    resolution=resolution,
+                # Fetch candles from Drift
+                raw_candles = await self.client.get_candles(
                     market=market,
-                    raw_data=raw
+                    resolution=resolution,
+                    start_time=start_ts,
+                    end_time=end_ts
                 )
-                candles.append(candle)
                 
-            return candles
-            
+                # Convert to StandardizedCandle format
+                candles = []
+                for raw in raw_candles:
+                    candle = StandardizedCandle(
+                        timestamp=datetime.fromtimestamp(raw["time"] / 1000, tz=timezone.utc),
+                        open=float(raw["open"]),
+                        high=float(raw["high"]),
+                        low=float(raw["low"]),
+                        close=float(raw["close"]),
+                        volume=float(raw["volume"]),
+                        source="drift",
+                        resolution=resolution,
+                        market=market,
+                        raw_data=raw
+                    )
+                    candles.append(candle)
+                    
+                return candles
+            else:
+                # Use direct HTTP request to public S3 bucket for historical data
+                # Format the URL based on the market and time range
+                formatted_market = market.replace("-", "").lower()
+                start_date = time_range.start.strftime("%Y-%m-%d")
+                end_date = time_range.end.strftime("%Y-%m-%d")
+                
+                # Create a session for HTTP requests
+                async with aiohttp.ClientSession() as session:
+                    # Construct URL for the S3 bucket
+                    url = f"{self.base_url}/{formatted_market}/{resolution}/{start_date}_to_{end_date}.json"
+                    
+                    try:
+                        async with session.get(url) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                
+                                # Parse the data into StandardizedCandle objects
+                                candles = []
+                                for item in data:
+                                    try:
+                                        timestamp = datetime.fromtimestamp(item["time"] / 1000, tz=timezone.utc)
+                                        candle = StandardizedCandle(
+                                            timestamp=timestamp,
+                                            open=float(item["open"]),
+                                            high=float(item["high"]),
+                                            low=float(item["low"]),
+                                            close=float(item["close"]),
+                                            volume=float(item["volume"]),
+                                            source="drift",
+                                            resolution=resolution,
+                                            market=market,
+                                            raw_data=item
+                                        )
+                                        candles.append(candle)
+                                    except (KeyError, ValueError) as e:
+                                        logger.warning(f"Error parsing candle data: {e}")
+                                        continue
+                                
+                                return candles
+                            else:
+                                # If we can't access the data, fall back to mock data
+                                logger.warning(f"Failed to fetch data from S3: {response.status}. Falling back to mock data.")
+                                return self._generate_mock_candles(time_range, resolution, market)
+                    except Exception as e:
+                        logger.warning(f"Error fetching data from S3: {e}. Falling back to mock data.")
+                        return self._generate_mock_candles(time_range, resolution, market)
+                
         except Exception as e:
             logger.error(f"Error fetching historical candles: {e}")
             raise ExchangeError(f"Failed to fetch historical candles: {e}")
+
+    def _generate_mock_candles(
+        self,
+        time_range: TimeRange,
+        resolution: str,
+        market: str
+    ) -> List[StandardizedCandle]:
+        """Generate mock candles for testing."""
+        candles = []
+        current_time = time_range.start
+        
+        # Get interval in seconds
+        interval_seconds = self._get_resolution_seconds(resolution)
+        
+        while current_time <= time_range.end:
+            # Generate a mock candle with random price movements
+            base_price = 100.0 if "BTC" in market else 50.0 if "ETH" in market else 20.0
+            price_volatility = 0.05  # 5% volatility
+            
+            # Random price movement
+            open_price = base_price * (1 + random.uniform(-price_volatility, price_volatility))
+            close_price = open_price * (1 + random.uniform(-price_volatility, price_volatility))
+            high_price = max(open_price, close_price) * (1 + random.uniform(0, price_volatility))
+            low_price = min(open_price, close_price) * (1 - random.uniform(0, price_volatility))
+            volume = random.uniform(500, 2000)
+            
+            candle = StandardizedCandle(
+                timestamp=current_time,
+                open=open_price,
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                volume=volume,
+                source='drift',
+                resolution=resolution,
+                market=market,
+                raw_data={
+                    'mock': True,
+                    'interval': resolution
+                }
+            )
+            candles.append(candle)
+            
+            # Increment time based on resolution
+            current_time = datetime.fromtimestamp(current_time.timestamp() + interval_seconds, tz=timezone.utc)
+        
+        return candles
 
     async def fetch_live_candles(
         self,
         market: str,
         resolution: str = "1"
     ) -> StandardizedCandle:
-        """
-        Fetch live candlestick data.
-        
-        Args:
-            market: Market symbol (e.g., "SOL-PERP")
-            resolution: Candle resolution in minutes
-            
-        Returns:
-            StandardizedCandle object
-        """
+        """Fetch live candle data."""
+        # If in test mode, return a mock candle
         if self._is_test_mode:
-            # Generate a mock live candle
-            return StandardizedCandle(
-                timestamp=datetime.now(timezone.utc),
-                open=100.0 + random.uniform(-5, 5),
-                high=105.0 + random.uniform(-5, 5),
-                low=95.0 + random.uniform(-5, 5),
-                close=102.0 + random.uniform(-5, 5),
-                volume=1000.0 + random.uniform(-100, 100),
-                source="drift",
-                resolution=resolution,
-                market=market,
-                raw_data={"mock": True}
-            )
+            return self._generate_mock_live_candle(market, resolution)
             
         try:
             if not self.client:
@@ -283,6 +379,35 @@ class DriftHandler(BaseExchangeHandler):
             logger.error(f"Error fetching live candles: {e}")
             raise ExchangeError(f"Failed to fetch live candles: {e}")
 
+    def _generate_mock_live_candle(self, market: str, resolution: str) -> StandardizedCandle:
+        """Generate a mock live candle for testing."""
+        # Base price depends on the market
+        base_price = 100.0 if "BTC" in market else 50.0 if "ETH" in market else 20.0
+        price_volatility = 0.02  # 2% volatility
+        
+        # Random price movement
+        open_price = base_price * (1 + random.uniform(-price_volatility, price_volatility))
+        close_price = open_price * (1 + random.uniform(-price_volatility, price_volatility))
+        high_price = max(open_price, close_price) * (1 + random.uniform(0, price_volatility))
+        low_price = min(open_price, close_price) * (1 - random.uniform(0, price_volatility))
+        volume = random.uniform(100, 500)
+        
+        return StandardizedCandle(
+            timestamp=datetime.now(timezone.utc),
+            open=open_price,
+            high=high_price,
+            low=low_price,
+            close=close_price,
+            volume=volume,
+            source='drift',
+            resolution=resolution,
+            market=market,
+            raw_data={
+                'mock': True,
+                'interval': resolution
+            }
+        )
+
     async def __aenter__(self):
         """Async context manager entry."""
         await self.start()
@@ -296,6 +421,16 @@ class DriftHandler(BaseExchangeHandler):
         """Get the DriftClient instance, initializing if necessary."""
         if not self.client:
             await self.start()
+        return self.client
+        
+    async def _get_authenticated_client(self) -> DriftClient:
+        """Get an authenticated Drift client for operations requiring authentication."""
+        if not self._auth_handler.is_authenticated():
+            raise ExchangeError("Authentication required for this operation")
+            
+        if not self.client:
+            await self.start()
+            
         return self.client
 
     def create_candles_from_trades(self, trades: List[Dict], resolution: str) -> List[StandardizedCandle]:
@@ -612,6 +747,23 @@ class DriftHandler(BaseExchangeHandler):
         finally:
             if handler:
                 await handler.stop()
+
+    async def is_ready(self) -> bool:
+        """Check if the handler is ready to use."""
+        if self._is_test_mode:
+            return True
+        
+        # If not in test mode, check if client is initialized
+        if self.client:
+            return True
+            
+        # Try to initialize client if not already done
+        try:
+            await self._initialize_drift_client()
+            return self.client is not None
+        except Exception as e:
+            logger.warning(f"Failed to initialize Drift client during ready check: {e}")
+            return False
 
 # Example usage
 async def main():

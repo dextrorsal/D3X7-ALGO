@@ -83,8 +83,20 @@ class UltimateDataFetcher:
         
         # Register markets for each exchange
         for exchange_name, handler in self.exchange_handlers.items():
-            if hasattr(handler, 'markets') and handler.markets:
-                self.symbol_mapper.register_exchange(exchange_name, handler.markets)
+            try:
+                if hasattr(handler, 'markets') and handler.markets:
+                    self.symbol_mapper.register_exchange(exchange_name, handler.markets)
+                elif hasattr(handler, 'config') and hasattr(handler.config, 'markets'):
+                    # Use markets from config if available
+                    self.symbol_mapper.register_exchange(exchange_name, handler.config.markets)
+                else:
+                    logger.warning(f"No markets available for {exchange_name} during symbol mapper initialization")
+            except Exception as e:
+                logger.warning(f"Error registering markets for {exchange_name}: {str(e)}")
+                
+        # Count the number of exchanges with registered symbols
+        registered_exchanges = len(self.symbol_mapper.supported_symbols)
+        logger.info(f"Initialized symbol mapper with {registered_exchanges} exchanges")
 
     async def fetch_historical_data(
         self,
@@ -97,6 +109,10 @@ class UltimateDataFetcher:
         if not exchanges:
             exchanges = list(self.exchange_handlers.keys())
 
+        # Initialize symbol mapper if not already done
+        if not hasattr(self, 'symbol_mapper') or self.symbol_mapper is None:
+            self.initialize_symbol_mapper()
+
         for exchange_name in exchanges:
             handler = self.exchange_handlers.get(exchange_name)
             if not handler:
@@ -105,20 +121,24 @@ class UltimateDataFetcher:
 
             for market_symbol in markets:
                 try:
-                    # Check two cases:
-                    # 1. The market_symbol is already in the exchange's native format
-                    # 2. The market_symbol is in standard format and needs conversion
-
                     # First, check if the market is directly in the handler's markets list
-                    is_valid_market = market_symbol in handler.markets
-
+                    is_valid_market = False
+                    
+                    # Safely check if markets attribute exists
+                    if hasattr(handler, 'markets') and handler.markets:
+                        is_valid_market = market_symbol in handler.markets
+                    
                     # If not found directly, try validating as a standard symbol
                     if not is_valid_market:
-                        result = handler.validate_standard_symbol(market_symbol)
-                        if asyncio.iscoroutine(result):
-                            is_valid_market = await result
-                        else:
-                            is_valid_market = result
+                        try:
+                            result = handler.validate_standard_symbol(market_symbol)
+                            if asyncio.iscoroutine(result):
+                                is_valid_market = await result
+                            else:
+                                is_valid_market = result
+                        except Exception as e:
+                            logger.warning(f"Error validating {market_symbol} on {exchange_name}: {str(e)}")
+                            continue
 
                     if not is_valid_market:
                         logger.info(f"Market {market_symbol} not supported by {exchange_name}, skipping")
@@ -126,34 +146,61 @@ class UltimateDataFetcher:
 
                     # Get the exchange-specific format if needed
                     try:
-                        if market_symbol in handler.markets:
+                        if hasattr(handler, 'markets') and handler.markets and market_symbol in handler.markets:
                             exchange_market = market_symbol
+                        elif hasattr(self, 'symbol_mapper') and self.symbol_mapper:
+                            try:
+                                exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, market_symbol)
+                            except Exception:
+                                # If symbol mapping fails, try using the original symbol
+                                exchange_market = market_symbol
                         else:
-                            exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, market_symbol)
-                    except:
+                            exchange_market = market_symbol
+                    except Exception as e:
+                        logger.warning(f"Symbol mapping error for {market_symbol} on {exchange_name}: {str(e)}")
                         exchange_market = market_symbol
 
                     logger.info(f"Fetching historical data for {market_symbol} (exchange format: {exchange_market}) from {exchange_name}")
-                    candles = await handler.fetch_historical_candles(exchange_market, time_range, resolution)
+                    
+                    try:
+                        candles = await handler.fetch_historical_candles(exchange_market, time_range, resolution)
+                        
+                        if not candles:
+                            logger.warning(f"No data returned for {market_symbol} from {exchange_name}")
+                            continue
+                            
+                        # Verify candles have the expected format
+                        if isinstance(candles, list) and len(candles) > 0:
+                            # Check if the first candle has the expected attributes
+                            first_candle = candles[0]
+                            if not hasattr(first_candle, 'timestamp'):
+                                logger.error(f"Invalid candle format for {market_symbol} from {exchange_name}: missing timestamp")
+                                continue
+                        else:
+                            logger.warning(f"Empty or invalid candle data for {market_symbol} from {exchange_name}")
+                            continue
 
-                    await self.raw_storage.store_candles(
-                        exchange_name,
-                        market_symbol,
-                        resolution,
-                        candles
-                    )
+                        await self.raw_storage.store_candles(
+                            exchange_name,
+                            market_symbol,
+                            resolution,
+                            candles
+                        )
 
-                    await self.processed_storage.store_candles(
-                        exchange_name,
-                        market_symbol,
-                        resolution,
-                        candles
-                    )
+                        await self.processed_storage.store_candles(
+                            exchange_name,
+                            market_symbol,
+                            resolution,
+                            candles
+                        )
 
-                    logger.info(f"Stored {len(candles)} candles for {market_symbol} from {exchange_name}")
+                        logger.info(f"Stored {len(candles)} candles for {market_symbol} from {exchange_name}")
+
+                    except Exception as e:
+                        logger.error(f"Error fetching data for {market_symbol} from {exchange_name}: {e}")
 
                 except Exception as e:
-                    logger.error(f"Error fetching data for {market_symbol} from {exchange_name}: {e}")
+                    logger.error(f"Error processing market {market_symbol} from {exchange_name}: {e}")
 
     async def start_live_fetching(
         self,

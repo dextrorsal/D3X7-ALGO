@@ -12,20 +12,30 @@ import asyncio
 from src.core.models import StandardizedCandle, ExchangeCredentials, TimeRange
 from src.core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
 from src.core.config import ExchangeConfig
+from src.exchanges.auth import BaseAuth
 
 logger = logging.getLogger(__name__)
 
 class BaseExchangeHandler(ABC):
     """Abstract base class for all exchange handlers."""
 
-    def __init__(self, config: ExchangeConfig):
-        """Initialize the exchange handler with configuration."""
+    def __init__(self, config: ExchangeConfig, auth_handler: Optional[BaseAuth] = None):
+        """
+        Initialize the exchange handler with configuration.
+        
+        Args:
+            config: Exchange configuration
+            auth_handler: Authentication handler (optional)
+        """
         self.config = config
         self.name = config.name
         self.credentials = config.credentials
         self.rate_limit = config.rate_limit
         self.markets = config.markets
         self.base_url = config.base_url
+        
+        # Authentication
+        self._auth_handler = auth_handler
         
         # Rate limiting
         self._last_request_time = 0
@@ -83,16 +93,49 @@ class BaseExchangeHandler(ABC):
         headers: Optional[Dict] = None,
         data: Optional[Dict] = None,
         timeout: int = 30,
-        as_json: bool = True
+        as_json: bool = True,
+        authenticated: bool = False
     ) -> any:
         """
         Make an HTTP request with rate limiting and error handling.
         
-        If as_json is True (default), the response is parsed as JSON.
-        If as_json is False, the raw text response is returned.
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            endpoint: API endpoint
+            params: Query parameters
+            headers: HTTP headers
+            data: Request body data
+            timeout: Request timeout in seconds
+            as_json: Whether to parse response as JSON
+            authenticated: Whether this is an authenticated request
+            
+        Returns:
+            Response data (JSON or text)
+            
+        Raises:
+            ApiError: If API returns an error
+            ExchangeError: If request fails
         """
         if self._session is None:
             await self.start()
+            
+        # Handle rate limiting
+        await self._handle_rate_limit()
+        
+        # Get authentication headers if needed
+        if authenticated and self._auth_handler:
+            auth_headers = self._auth_handler.get_auth_headers(
+                method=method,
+                endpoint=endpoint,
+                params=params,
+                data=data
+            )
+            
+            # Merge with existing headers
+            if headers:
+                headers.update(auth_headers)
+            else:
+                headers = auth_headers
 
         try:
             url = f"{self.base_url}{endpoint}"

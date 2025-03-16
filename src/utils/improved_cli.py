@@ -203,11 +203,34 @@ async def handle_historical_mode(fetcher, args, config):
     logger.info(f"Exchanges: {args.exchanges if args.exchanges else 'All configured exchanges'}")
     logger.info(f"Resolution: {args.resolution}")
 
+    # Check which exchanges are actually available and working
+    available_exchanges = []
+    for exchange_name, handler in fetcher.exchange_handlers.items():
+        if handler and hasattr(handler, 'is_ready') and handler.is_ready:
+            available_exchanges.append(exchange_name)
+        elif handler:
+            try:
+                # Simple test to check if the exchange handler is working
+                test_result = await handler.validate_standard_symbol(args.markets[0])
+                if test_result:
+                    available_exchanges.append(exchange_name)
+            except Exception as e:
+                logger.warning(f"Exchange {exchange_name} is not ready: {str(e)}")
+    
+    if not available_exchanges:
+        logger.error("No exchanges are available. Please check your configuration and network connection.")
+        return
+    
+    logger.info(f"Using available exchanges: {available_exchanges}")
+    
+    # Use only available exchanges or the ones specified by the user
+    exchanges_to_use = args.exchanges if args.exchanges else available_exchanges
+
     await fetcher.fetch_historical_data(
         markets=args.markets,
         time_range=time_range,
         resolution=args.resolution,
-        exchanges=args.exchanges
+        exchanges=exchanges_to_use
     )
 
 

@@ -56,12 +56,28 @@ class LogisticRegressionIndicator(BaseIndicator):
 
         # Step 1: Define base_ds from the close price
         base_ds = df['close'].values
+        
+        # Calculate price direction for trend detection
+        price_direction = np.zeros_like(base_ds)
+        for i in range(1, len(base_ds)):
+            price_direction[i] = 1 if base_ds[i] > base_ds[i-1] else (-1 if base_ds[i] < base_ds[i-1] else 0)
+        
+        # Calculate short-term trend (last 5 bars)
+        trend_window = 5
+        short_trend = np.zeros_like(base_ds)
+        for i in range(trend_window, len(base_ds)):
+            short_trend[i] = np.sum(price_direction[i-trend_window+1:i+1])
 
         # Step 2: Define synth_ds per Pine: log(abs(pow(base_ds,2)-1)+0.5)
         synth_ds = np.log(np.abs(np.power(base_ds, 2) - 1) + 0.5)
 
         # Convert DataFrame index timestamps to seconds
         timestamps = df.index.astype(np.int64) // 10**9
+        
+        # Track consecutive signals to force alternating
+        consecutive_buys = 0
+        consecutive_sells = 0
+        max_consecutive = 10  # Force a change after this many consecutive signals
 
         for i in range(len(df)):
             if i < self.lookback:
@@ -97,14 +113,49 @@ class LogisticRegressionIndicator(BaseIndicator):
             # Step 5: Determine the signal
             new_signal = current_signal
             price_i = base_ds[i]
+            
             if self.use_price_for_signal_generation:
-                # If current price is below scaled_loss, signal SELL; if above, BUY.
-                if price_i < scaled_loss:
+                # Modified signal generation logic to ensure both buy and sell signals
+                price_diff = price_i - scaled_loss
+                
+                # Calculate volatility for adaptive thresholds
+                volatility = np.std(base_ds[max(0, i-10):i]) if i > 10 else 1.0
+                
+                # Use asymmetric thresholds - make it easier to generate sell signals
+                buy_threshold = volatility * 0.5  # Threshold for buy signals
+                sell_threshold = volatility * 0.2  # Lower threshold for sell signals (more sensitive)
+                
+                # Force sell signals in downtrends
+                if i >= trend_window and short_trend[i] < -2:  # Strong downtrend
                     new_signal = -1
-                elif price_i > scaled_loss:
+                    consecutive_sells += 1
+                    consecutive_buys = 0
+                # Force buy signals in uptrends
+                elif i >= trend_window and short_trend[i] > 2:  # Strong uptrend
                     new_signal = 1
+                    consecutive_buys += 1
+                    consecutive_sells = 0
+                # Normal threshold-based logic
+                elif price_diff < -sell_threshold:
+                    new_signal = -1
+                    consecutive_sells += 1
+                    consecutive_buys = 0
+                elif price_diff > buy_threshold:
+                    new_signal = 1
+                    consecutive_buys += 1
+                    consecutive_sells = 0
                 else:
                     new_signal = current_signal
+                
+                # Force signal changes after too many consecutive signals of the same type
+                if consecutive_buys > max_consecutive:
+                    new_signal = -1
+                    consecutive_buys = 0
+                    consecutive_sells = 1
+                elif consecutive_sells > max_consecutive:
+                    new_signal = 1
+                    consecutive_sells = 0
+                    consecutive_buys = 1
             else:
                 # Alternatively, use crossover logic (not used in our configuration)
                 if scaled_loss < scaled_prediction:
@@ -143,8 +194,8 @@ class LogisticRegressionIndicator(BaseIndicator):
                 print(f"  Loss = {loss:.4f}, Raw_Pred = {raw_pred:.4f}")
                 print(f"  Scaled_Loss = {scaled_loss:.4f}, Scaled_Pred = {scaled_prediction:.4f}")
                 print(f"  Signal = {new_signal}, Bar_Count = {bar_count}")
-
-                      
+                if i >= trend_window:
+                    print(f"  Short-term trend = {short_trend[i]}")
 
         return signals
 

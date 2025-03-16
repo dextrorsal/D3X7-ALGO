@@ -33,3 +33,11 @@ class ApiError(ExchangeError):
 class DataProcessingError(DataFetcherError):
     """Raised when data processing fails."""
     pass
+
+class AuthError(DataFetcherError):
+    """Raised when authentication fails."""
+    pass
+
+class CredentialError(AuthError):
+    """Raised when there's an issue with credentials."""
+    pass
