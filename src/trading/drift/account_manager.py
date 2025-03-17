@@ -87,45 +87,33 @@ class DriftAccountManager:
         amount_in_precision = int(amount * (10 ** spot_market.decimals))
         self.logger.info(f"Amount in proper precision: {amount_in_precision}")
 
-        # Try using the direct deposit method first
+        # Create a temporary WSOL account and get deposit instructions
+        self.logger.info("Creating temporary WSOL account and deposit instructions...")
+        wsol_ixs, wsol_account = await self.drift_client.get_wrapped_sol_account_creation_ixs(
+            amount=amount_in_precision,
+            include_rent=True
+        )
+        
+        # Get deposit instruction
+        deposit_ix = await self.drift_client.get_deposit_collateral_ix(
+            amount=amount_in_precision,
+            spot_market_index=spot_market_index,
+            user_token_account=wsol_account,
+            sub_account_id=0
+        )
+        
+        # Combine all instructions
+        all_instructions = [*wsol_ixs, deposit_ix]
+        
+        # Send the combined transaction
+        self.logger.info("Sending combined transaction...")
         try:
-            self.logger.info("Attempting direct deposit...")
-            tx_sig = await self.drift_client.deposit(
-                amount=amount_in_precision,
-                spot_market_index=spot_market_index,
-                sub_account_id=0,  # Main account
-                reduce_only=False
-            )
-            self.logger.info(f"Direct deposit successful! Transaction signature: {tx_sig}")
+            tx_sig = await self.drift_client.send_ixs(all_instructions)
+            self.logger.info(f"Deposit successful! Transaction signature: {tx_sig}")
             return tx_sig
         except Exception as e:
-            self.logger.info(f"Direct deposit failed, trying with wrapped SOL: {e}")
-            
-            # Create a temporary WSOL account and deposit in one transaction
-            self.logger.info("Creating temporary WSOL account and deposit instructions...")
-            wsol_ixs, wsol_account = await self.drift_client.get_wrapped_sol_account_creation_ixs(
-                amount=amount_in_precision,
-                include_rent=True
-            )
-            
-            # Get deposit instruction
-            deposit_ix = await self.drift_client.get_deposit_collateral_ix(
-                amount=amount_in_precision,
-                spot_market_index=spot_market_index,
-                user_token_account=wsol_account,
-                sub_account_id=0
-            )
-            
-            # Combine instructions and send transaction
-            self.logger.info("Sending combined transaction...")
-            # Use the direct deposit method from the documentation
-            try:
-                tx_sig = await self.drift_client.send_ixs([deposit_ix])
-                self.logger.info(f"Deposit successful! Transaction signature: {tx_sig}")
-                return tx_sig
-            except Exception as e:
-                self.logger.error(f"Error depositing SOL: {e}")
-                raise
+            self.logger.error(f"Error depositing SOL: {e}")
+            raise
             
     async def withdraw_sol(self, amount: float) -> str:
         """Withdraw SOL from Drift account"""
@@ -198,7 +186,7 @@ class DriftAccountManager:
             logger.info("\n=== Spot Positions ===")
             for position in user.spot_positions:
                 if position.scaled_balance != 0:
-                    market = await self.drift_client.get_spot_market_account(position.market_index)
+                    market = self.drift_client.get_spot_market_account(position.market_index)
                     token_amount = position.scaled_balance / (10 ** market.decimals)
                     logger.info(f"Market {position.market_index}: {token_amount:.6f}")
                     
@@ -254,38 +242,87 @@ class DriftAccountManager:
 async def main():
     """CLI interface for account management"""
     parser = argparse.ArgumentParser(description="Drift Account Manager CLI")
-    parser.add_argument('action', choices=['deposit', 'withdraw', 'balance'],
-                       help='Action to perform')
-    parser.add_argument('--amount', type=float, help='Amount for deposit/withdraw')
+    subparsers = parser.add_subparsers(dest='action', help='Action to perform')
+    
+    # Balance command
+    balance_parser = subparsers.add_parser('balance', help='Show account balances')
+    
+    # Deposit command
+    deposit_parser = subparsers.add_parser('deposit', help='Deposit funds')
+    deposit_parser.add_argument('--token', choices=['SOL', 'USDC'], required=True,
+                              help='Token to deposit')
+    deposit_parser.add_argument('--amount', type=float, required=True,
+                              help='Amount to deposit')
+    deposit_parser.add_argument('--force', action='store_true',
+                              help='Skip confirmation prompt')
+    
+    # Withdraw command
+    withdraw_parser = subparsers.add_parser('withdraw', help='Withdraw funds')
+    withdraw_parser.add_argument('--token', choices=['SOL', 'USDC'], required=True,
+                               help='Token to withdraw')
+    withdraw_parser.add_argument('--amount', type=float, required=True,
+                               help='Amount to withdraw')
+    withdraw_parser.add_argument('--force', action='store_true',
+                               help='Skip confirmation prompt')
     
     args = parser.parse_args()
+    if not args.action:
+        parser.print_help()
+        return
     
     manager = DriftAccountManager()
     try:
         await manager.setup()
         
         if args.action == 'deposit':
-            if not args.amount:
-                raise ValueError("Amount required for deposit")
-            await manager.deposit_sol(args.amount)
+            # Show current balance before deposit
+            await manager.show_balances()
+            
+            # Confirm deposit unless --force is used
+            if not args.force:
+                confirm = input(f"\nAre you sure you want to deposit {args.amount} {args.token}? [y/N] ")
+                if confirm.lower() != 'y':
+                    logger.info("Deposit cancelled")
+                    return
+            
+            if args.token == 'SOL':
+                await manager.deposit_sol(args.amount)
+            else:  # USDC
+                await manager.deposit_usdc(args.amount)
+                
+            # Show updated balance
+            await manager.show_balances()
             
         elif args.action == 'withdraw':
-            if not args.amount:
-                raise ValueError("Amount required for withdrawal")
-            await manager.withdraw_sol(args.amount)
+            # Show current balance before withdrawal
+            await manager.show_balances()
+            
+            # Confirm withdrawal unless --force is used
+            if not args.force:
+                confirm = input(f"\nAre you sure you want to withdraw {args.amount} {args.token}? [y/N] ")
+                if confirm.lower() != 'y':
+                    logger.info("Withdrawal cancelled")
+                    return
+            
+            if args.token == 'SOL':
+                await manager.withdraw_sol(args.amount)
+            else:  # USDC
+                logger.error("USDC withdrawal not implemented yet")
+                
+            # Show updated balance
+            await manager.show_balances()
             
         elif args.action == 'balance':
             await manager.show_balances()
             
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
-        if manager.drift_client:
-            await manager.drift_client.unsubscribe()
     except Exception as e:
         logger.error(f"Error in account manager: {str(e)}")
+        raise
+    finally:
         if manager.drift_client:
             await manager.drift_client.unsubscribe()
-        raise
 
 if __name__ == "__main__":
     try:
@@ -293,4 +330,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nExiting gracefully...")
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}") 
+        logger.error(f"Fatal error: {str(e)}")
+        raise 

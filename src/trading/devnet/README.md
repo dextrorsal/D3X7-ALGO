@@ -1,28 +1,50 @@
-# Trading Devnet Directory
+# Devnet Testing Environment
 
-This directory contains components for interacting with Solana's devnet, specifically focused on Drift Protocol integration for testing and development purposes.
+This directory contains components for testing and development on Solana's devnet, with a focus on Drift Protocol integration.
 
 ## Directory Structure
 
 ```
-devnet/
-├── __init__.py          - Module exports and initialization
-├── drift_auth.py        - Drift authentication and client setup
-└── README.md           - This file
+/src/trading/
+├── devnet/                # Devnet components
+│   ├── __init__.py       # Module exports
+│   ├── drift_auth.py     # Drift authentication
+│   ├── check_jupiter_devnet.py  # Jupiter testing
+│   └── README.md         # This file
+└── tests/
+    └── devnet/           # Devnet test suite
+        ├── test_drift_auth.py
+        ├── test_drift_account_manager.py
+        └── test_drift_setup.py
+```
+
+## Quick Start
+
+Run tests from the project root:
+
+```bash
+# Test authentication
+python -m pytest src/trading/tests/devnet/test_drift_auth.py
+
+# Test account management
+python -m pytest src/trading/tests/devnet/test_drift_account_manager.py
+
+# Test setup
+python -m pytest src/trading/tests/devnet/test_drift_setup.py
 ```
 
 ## Component Details
 
-### 1. `drift_auth.py`
+### 1. Drift Authentication (`drift_auth.py`)
 
-The core authentication and client initialization module for Drift Protocol on devnet.
+Core authentication and client initialization for Drift Protocol on devnet.
 
 **Key Features:**
-- `DriftHelper` class for managing Drift client initialization
-- Wallet loading and management
-- RPC connection setup
-- User account information retrieval
-- Balance and PnL tracking
+- Secure wallet loading and management
+- RPC connection setup with retry logic
+- User account initialization and verification
+- Balance tracking and PnL calculation
+- Safe transaction handling
 
 **Usage Example:**
 ```python
@@ -31,64 +53,145 @@ from src.trading.devnet.drift_auth import DriftHelper
 async def example():
     helper = DriftHelper()
     
-    # Initialize Drift client
+    # Initialize with devnet configuration
     drift_client = await helper.initialize_drift()
     
-    # Get user account information
-    await helper.get_user_info()
+    try:
+        # Get user account information
+        user_info = await helper.get_user_info()
+        print(f"Account Balance: {user_info['total_collateral']}")
+    finally:
+        await drift_client.unsubscribe()
 ```
 
-**Requirements:**
-- Solana keypair at `~/.config/solana/id.json`
-- Active devnet connection
-- Sufficient devnet SOL for transactions
+### 2. Jupiter Testing (`check_jupiter_devnet.py`)
 
-### 2. `__init__.py`
+Tests Jupiter integration on devnet for swap functionality.
 
-Module initialization file that exports key components:
-- `DriftHelper`: For client initialization and authentication
-- `DriftAccountManager`: For managing Drift accounts and transactions
+**Key Features:**
+- Price quote fetching
+- Swap route optimization
+- Transaction simulation
+- Slippage protection
 
-## Common Operations
+## Environment Setup
 
-1. **Client Initialization:**
-   ```python
-   helper = DriftHelper()
-   drift_client = await helper.initialize_drift()
+### Prerequisites
+1. **Solana CLI Tools:**
+   ```bash
+   sh -c "$(curl -sSfL https://release.solana.com/v1.17.9/install)"
    ```
 
-2. **Checking Account Information:**
-   ```python
-   await helper.get_user_info()
+2. **Devnet Account:**
+   ```bash
+   solana-keygen new --outfile ~/.config/solana/devnet.json
+   solana config set --url devnet
+   solana airdrop 2 # Get devnet SOL
    ```
 
-## Best Practices
+### Configuration
+Required environment variables:
+```bash
+export DEVNET_RPC_URL="https://api.devnet.solana.com"
+export DEVNET_WALLET_PATH="~/.config/solana/devnet.json"
+```
 
-1. **Error Handling:**
-   - Always use try-catch blocks for async operations
-   - Properly close connections using `drift_client.unsubscribe()`
+## Testing Framework
 
-2. **Resource Management:**
+### Test Organization
+1. **Authentication Tests:**
+   - Wallet loading
+   - Client initialization
+   - Connection management
+
+2. **Account Management Tests:**
+   - Deposit functionality
+   - Balance checking
+   - Position management
+
+3. **Setup Tests:**
+   - Market initialization
+   - Account creation
+   - Permission verification
+
+### Running Tests
+```bash
+# Run all devnet tests
+python -m pytest src/trading/tests/devnet/
+
+# Run specific test file
+python -m pytest src/trading/tests/devnet/test_drift_auth.py -v
+
+# Run with debug logging
+python -m pytest src/trading/tests/devnet/test_drift_auth.py -v --log-cli-level=DEBUG
+```
+
+## Integration with Main Module
+
+### Drift Integration
+- `drift_auth.py` provides authentication for main Drift module
+- Shares account management logic with production code
+- Uses same transaction parameters for consistency
+
+### Jupiter Integration
+- Test swaps and routing on devnet
+- Verify slippage calculations
+- Test price impact estimation
+
+## Security and Best Practices
+
+1. **Wallet Safety:**
+   - NEVER use mainnet wallets for testing
+   - Keep devnet private keys separate
+   - Use environment variables for sensitive data
+
+2. **Error Handling:**
    ```python
    try:
-       # Your code here
+       await helper.initialize_drift()
+   except Exception as e:
+       logger.error(f"Initialization failed: {e}")
    finally:
        await drift_client.unsubscribe()
    ```
 
-3. **Transaction Parameters:**
-   - Default compute units: 1,400,000
-   - Default compute units price: 85,000
-   - Can be customized when initializing the client
+3. **Resource Management:**
+   - Clean up connections after tests
+   - Monitor compute unit usage
+   - Track transaction costs
 
-## Integration Points
+## Troubleshooting
 
-- Works with the main trading module for devnet testing
-- Integrates with Drift Protocol's devnet deployment
-- Compatible with Jupiter aggregator for testing strategies
+Common issues and solutions:
 
-## Notes
+1. **RPC Connection Issues:**
+   - Check devnet status: `solana ping`
+   - Verify RPC URL is correct
+   - Try alternative RPC endpoints
 
-- All operations are performed on Solana's devnet
-- Requires devnet SOL for testing (use devnet faucet)
-- Keep private keys secure and never use mainnet keys for testing
+2. **Insufficient Balance:**
+   - Request devnet airdrop: `solana airdrop 2`
+   - Check balance: `solana balance`
+   - Monitor transaction costs
+
+3. **Test Failures:**
+   - Check logs with `-v` flag
+   - Verify wallet permissions
+   - Ensure market is initialized
+
+## Development Guidelines
+
+1. **Code Organization:**
+   - Keep tests in `/tests/devnet/`
+   - Maintain separation from mainnet code
+   - Use clear naming conventions
+
+2. **Documentation:**
+   - Comment complex test scenarios
+   - Document setup requirements
+   - Keep README updated
+
+3. **Testing Strategy:**
+   - Start with unit tests
+   - Add integration tests
+   - Include error cases

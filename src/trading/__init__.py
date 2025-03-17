@@ -8,13 +8,13 @@ from .jup.jup_adapter import JupiterAdapter
 
 # Drift trading components
 from .drift.drift_adapter import DriftAdapter
+from .drift.account_manager import DriftAccountManager
 
 # Solana mainnet utilities
 from .mainnet.sol_wallet import SolanaWallet
 
 # Devnet components
 from .devnet.drift_auth import DriftHelper
-from .devnet.drift_account_manager import DriftAccountManager
 
 __all__ = [
     # Mainnet components

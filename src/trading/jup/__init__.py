@@ -1,15 +1,13 @@
 """
-Jupiter Aggregator trading components
+Jupiter integration module exports
 """
 
 from .jup_adapter import JupiterAdapter
 from .live_trader import LiveTrader
-from .jup_live_strat import JupiterLiveStrategy
-from .paper_report import PaperTradeReport
+from .account_manager import JupiterAccountManager
 
 __all__ = [
     'JupiterAdapter',
     'LiveTrader',
-    'JupiterLiveStrategy',
-    'PaperTradeReport'
+    'JupiterAccountManager'
 ]

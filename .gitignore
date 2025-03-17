@@ -1,10 +1,65 @@
-# Byte-compiled / optimized / DLL files
+# Sensitive directories
+/src/utils/wallet/
+/config/
+/drift-git-examples/
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and databases
+*.log
+*.sqlite
+logs/
+data/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Distribution / packaging
 .Python
@@ -75,9 +130,6 @@ docs/_build/
 .pybuilder/
 target/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
 # IPython
 profile_default/
 ipython_config.py
@@ -135,6 +187,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+lenv/
 
 # Spyder project settings
 .spyderproject
@@ -178,6 +231,11 @@ cython_debug/
 /test_data/
 /monte_carlo_results/
 /optimization_results/
+/test_config/
+/study-docs/
+/results/
+/logs/
+/reports/
 *.csv
 *.json
 *.db
@@ -191,8 +249,11 @@ cython_debug/
 .env
 credentials.json
 config.json
+/config/
+/src/utils/wallet
 
 # IDE specific
 .vscode/
 .idea/
 .cursor/
+

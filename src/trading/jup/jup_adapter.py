@@ -13,14 +13,45 @@ import base64
 import os
 from pathlib import Path
 import random
-from src.utils.solana.sol_rpc import get_solana_client
+from src.utils.wallet.sol_rpc import get_solana_client
+import aiohttp
+from solana.rpc.async_api import AsyncClient
+from solders.keypair import Keypair
+from solders.transaction import VersionedTransaction
+from solana.rpc.commitment import Commitment
+from dotenv import load_dotenv
+from solders.pubkey import Pubkey
+from spl.token.constants import TOKEN_PROGRAM_ID
+from src.utils.wallet.sol_wallet import get_wallet
+import requests
 
-client = get_solana_client()
+# Load environment variables
+load_dotenv()
+
+# Use devnet by default
+DEFAULT_NETWORK = "devnet"
+NETWORK_URLS = {
+    "devnet": "https://api.devnet.solana.com",
+    "mainnet": "https://api.mainnet-beta.solana.com"
+}
+
+client = get_solana_client(DEFAULT_NETWORK)
 version_info = client.get_version()
-print("Connected Solana node version:", version_info)
-
+print(f"Connected Solana {DEFAULT_NETWORK} node version:", version_info)
 
 logger = logging.getLogger(__name__)
+
+# Token addresses for different networks
+NETWORK_TOKENS = {
+    "mainnet": {
+        "SOL": "So11111111111111111111111111111111111111112",
+        "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    },
+    "devnet": {
+        "SOL": "So11111111111111111111111111111111111111112",  # SOL mint is the same on all networks
+        "TEST": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"  # Devnet test token
+    }
+}
 
 class JupiterAdapter:
     """
@@ -28,63 +59,90 @@ class JupiterAdapter:
     Handles the specific logic for interacting with Jupiter APIs
     """
     
-    def __init__(self, config_path: str = None, keypair_path: str = None):
+    def __init__(self, config_path: str = None, keypair_path: str = None, network: str = DEFAULT_NETWORK):
         """
         Initialize Jupiter adapter
         
         Args:
             config_path: Path to configuration file
-            keypair_path: Path to Solana keypair file
+            keypair_path: Path to Solana keypair file (optional, will use PRIVATE_KEY_PATH from env if not provided)
+            network: Network to use ("devnet" or "mainnet", defaults to "devnet")
         """
         self.config_path = config_path
-        self.keypair_path = keypair_path
+        self.network = network.lower()
+        if self.network not in NETWORK_TOKENS:
+            raise ValueError(f"Invalid network: {network}. Must be one of: {', '.join(NETWORK_TOKENS.keys())}")
+            
+        # Use provided keypair_path or fall back to environment variable
+        self.keypair_path = keypair_path or os.getenv('PRIVATE_KEY_PATH')
+        if not self.keypair_path:
+            raise ValueError("No keypair path provided and PRIVATE_KEY_PATH not found in environment")
+            
         self.connected = False
         self.client = None
         self.wallet = None
+        self._session = None
         
-        # Jupiter primarily handles token swaps, not perpetual futures
-        # Define supported token pairs
-        self.markets = {
-            "SOL-USDC": {
-                "input_mint": "So11111111111111111111111111111111111111112",
-                "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "decimals_in": 9,
-                "decimals_out": 6
-            },
-            "BTC-USDC": {
-                "input_mint": "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
-                "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "decimals_in": 8,
-                "decimals_out": 6
-            },
-            "ETH-USDC": {
-                "input_mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
-                "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "decimals_in": 8,
-                "decimals_out": 6
-            },
-            "USDC-SOL": {
-                "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "output_mint": "So11111111111111111111111111111111111111112",
-                "decimals_in": 6,
-                "decimals_out": 9
-            },
-            "USDC-BTC": {
-                "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "output_mint": "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
-                "decimals_in": 6,
-                "decimals_out": 8
-            },
-            "USDC-ETH": {
-                "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "output_mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
-                "decimals_in": 6,
-                "decimals_out": 8
+        # Load configuration if provided
+        if config_path and os.path.exists(config_path):
+            with open(config_path) as f:
+                config = json.load(f)
+                self.rpc_url = config.get('rpc_url', NETWORK_URLS[self.network])
+        else:
+            self.rpc_url = NETWORK_URLS[self.network]
+        
+        logger.info(f"Initializing Jupiter adapter on {self.network}")
+        
+        # API endpoints - Update to use the Ultra API endpoint
+        self.ultra_api_url = "https://api.jup.ag/ultra/v1"
+        
+        # Define supported token pairs based on network
+        if self.network == "devnet":
+            # Devnet - SOL to TEST token
+            self.markets = {
+                "SOL-TEST": {
+                    "input_mint": NETWORK_TOKENS["devnet"]["SOL"],
+                    "output_mint": NETWORK_TOKENS["devnet"]["TEST"],
+                    "decimals_in": 9,
+                    "decimals_out": 9
+                }
             }
+        else:
+            # Original mainnet token pairs
+            self.markets = {
+                "SOL-USDC": {
+                    "input_mint": NETWORK_TOKENS["mainnet"]["SOL"],
+                    "output_mint": NETWORK_TOKENS["mainnet"]["USDC"],
+                    "decimals_in": 9,
+                    "decimals_out": 6
+                }
+            }
+        
+        # Ultra API configuration
+        self.ultra_config = {
+            "slippage_bps": 50,  # 0.5%
+            "priority_level": "veryHigh",
+            "max_priority_fee_lamports": 10000000,  # 0.01 SOL
+            "restrict_intermediate_tokens": True
         }
         
-        # API endpoints
-        self.api_url = "https://quote-api.jup.ag/v6"
+        self.tokens = NETWORK_TOKENS[self.network]
+        self.base_url = "https://quote-api.jup.ag/v6"
+        self.client = get_solana_client(network)
+        self.wallet = get_wallet()
+        logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
+
+        # Test connection
+        version = self.client.get_version()
+        logger.info(f"Connected to Solana node version: {version}")
+        logger.info("Connected to Jupiter API successfully")
+    
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        """Get or create an aiohttp session"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
     
     async def connect(self) -> bool:
         """
@@ -94,30 +152,34 @@ class JupiterAdapter:
             True if successful, False otherwise
         """
         try:
-            # Jupiter API doesn't require persistent connection,
-            # but we still need to load the wallet for signing transactions
-            
             logger.info("Setting up Jupiter adapter...")
             
+            # Initialize Solana client
+            self.client = AsyncClient(self.rpc_url, commitment=Commitment("confirmed"))
+            
             # Load keypair
-            if self.keypair_path and os.path.exists(self.keypair_path):
+            if not os.path.exists(self.keypair_path):
+                raise ValueError(f"Keypair file not found at: {self.keypair_path}")
+                
+            try:
                 logger.info(f"Loading keypair from {self.keypair_path}")
-                # In a real implementation, this would load the keypair
-                # keypair = Keypair.from_file(self.keypair_path)
-                # self.wallet = keypair
-            else:
-                logger.warning("No keypair file found, using mock wallet")
-                # Generate mock wallet with public key
-                self.wallet = {"pubkey": "JuPiTerXXXmockXXXwalletXXXaddressXXX"}
+                with open(self.keypair_path, 'r') as f:
+                    keypair_json = json.load(f)
+                    # Convert JSON array to bytes
+                    keypair_bytes = bytes(keypair_json)
+                    self.wallet = Keypair.from_bytes(keypair_bytes)
+                logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
+            except json.JSONDecodeError:
+                logger.info("Keypair file is not in JSON format, trying raw bytes...")
+                # Try reading as raw bytes in case it's not JSON
+                with open(self.keypair_path, 'rb') as f:
+                    keypair_bytes = f.read()
+                    self.wallet = Keypair.from_bytes(keypair_bytes)
+                logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
             
-            # Test API connection
-            # In a real implementation, this would make a test API call
-            
-            # Mock client for demonstration
-            self.client = {"connected": True}
-            
-            # Simulate connection delay
-            await asyncio.sleep(0.5)
+            # Test connection
+            version = await self.client.get_version()
+            logger.info(f"Connected to Solana node version: {version}")
             
             self.connected = True
             logger.info("Connected to Jupiter API successfully")
@@ -219,12 +281,149 @@ class JupiterAdapter:
             logger.error(f"Error getting account balances: {e}")
             raise
     
+    async def get_ultra_quote(self, 
+                            market: str, 
+                            input_amount: float,
+                            config: Optional[Dict] = None) -> Dict:
+        """
+        Get a quote using Jupiter Ultra API
+        
+        Args:
+            market: Market symbol (e.g., "SOL-USDC")
+            input_amount: Amount of input token
+            config: Optional configuration overrides
+            
+        Returns:
+            Quote details from Ultra API
+        """
+        try:
+            if market not in self.markets:
+                raise ValueError(f"Unknown market: {market}")
+                
+            market_config = self.markets[market]
+            
+            # Convert input amount to proper decimals
+            amount_in_base_units = int(input_amount * (10 ** market_config["decimals_in"]))
+            
+            # Get wallet address as string
+            wallet_address = str(self.wallet.pubkey)
+            
+            # Prepare request parameters exactly as per docs
+            params = {
+                "inputMint": market_config["input_mint"],
+                "outputMint": market_config["output_mint"],
+                "amount": str(amount_in_base_units),
+                "taker": wallet_address
+            }
+            
+            # Make API request to the Ultra order endpoint
+            url = f"{self.ultra_api_url}/order"
+            logger.info(f"Requesting Ultra order with params: {params}")
+            
+            async with self.session.get(url, params=params) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Ultra API order error: {error_text}")
+                
+                order_data = await response.json()
+                
+                # Log the response for debugging
+                logger.debug(f"Ultra order response: {json.dumps(order_data, indent=2)}")
+                
+                return order_data
+                
+        except Exception as e:
+            logger.error(f"Error getting Ultra order for {market}: {e}")
+            raise
+
+    async def execute_ultra_swap(self,
+                               market: str,
+                               input_amount: float,
+                               config: Optional[Dict] = None) -> Dict:
+        """
+        Execute a swap using Jupiter Ultra API
+        
+        Args:
+            market: Market symbol (e.g., "SOL-USDC")
+            input_amount: Amount of input token to swap
+            config: Optional configuration overrides
+            
+        Returns:
+            Swap execution details
+        """
+        try:
+            # Get quote first
+            quote = await self.get_ultra_quote(market, input_amount, config)
+            
+            # Prepare swap request
+            swap_request = {
+                "quoteResponse": quote,
+                "userPublicKey": str(self.wallet.pubkey),
+                "priorityLevel": config.get("priority_level", self.ultra_config["priority_level"]),
+                "maxPriorityFeeLamports": config.get("max_priority_fee_lamports",
+                                                   self.ultra_config["max_priority_fee_lamports"])
+            }
+            
+            # Get swap transaction
+            url = f"{self.ultra_api_url}/execute"
+            async with self.session.post(url, json=swap_request) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Ultra API execute error: {error_text}")
+                
+                execute_response = await response.json()
+                
+                # Extract and deserialize the transaction
+                transaction_base64 = execute_response["transaction"]
+                transaction = VersionedTransaction.deserialize(
+                    base64.b64decode(transaction_base64)
+                )
+                
+                # Sign the transaction
+                transaction.sign([self.wallet])
+                
+                # Serialize the signed transaction
+                signed_transaction = base64.b64encode(
+                    transaction.serialize()
+                ).decode('utf-8')
+                
+                # Submit the signed transaction
+                submit_request = {
+                    "signedTransaction": signed_transaction,
+                    "requestId": execute_response["requestId"]
+                }
+                
+                # Submit to Jupiter's execution endpoint
+                async with self.session.post(f"{self.ultra_api_url}/execute", json=submit_request) as submit_response:
+                    if submit_response.status != 200:
+                        error_text = await submit_response.text()
+                        raise Exception(f"Transaction submission error: {error_text}")
+                    
+                    result = await submit_response.json()
+                    
+                    if result["status"] == "Success":
+                        logger.info(f"Swap successful: {result['signature']}")
+                        return {
+                            "status": "success",
+                            "signature": result["signature"],
+                            "input_amount": result["inputAmountResult"],
+                            "output_amount": result["outputAmountResult"],
+                            "market": market,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    else:
+                        raise Exception(f"Swap failed: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            logger.error(f"Error executing Ultra swap for {market}: {e}")
+            raise
+
     async def execute_swap(self, 
                           market: str, 
                           input_amount: float,
                           slippage_bps: int = 50) -> Dict:
         """
-        Execute a token swap on Jupiter
+        Execute a token swap on Jupiter (using Ultra API)
         
         Args:
             market: Market symbol (e.g., "SOL-USDC")
@@ -234,81 +433,9 @@ class JupiterAdapter:
         Returns:
             Swap details
         """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            if market not in self.markets:
-                raise ValueError(f"Unknown market: {market}")
-                
-            market_config = self.markets[market]
-            
-            # Get current price
-            price = await self.get_market_price(market)
-            
-            # Calculate expected output
-            expected_output = input_amount * price
-            
-            # In a real implementation, this would call the Jupiter API
-            # Step 1: Get a quote
-            # url = f"{self.api_url}/quote"
-            # params = {
-            #     "inputMint": market_config["input_mint"],
-            #     "outputMint": market_config["output_mint"],
-            #     "amount": int(input_amount * 10**market_config["decimals_in"]),
-            #     "slippageBps": slippage_bps
-            # }
-            # async with self.session.get(url, params=params) as response:
-            #     if response.status != 200:
-            #         raise Exception(f"Quote API error: {await response.text()}")
-            #     quote = await response.json()
-            #
-            # # Step 2: Get swap instructions
-            # url = f"{self.api_url}/swap-instructions"
-            # swap_data = {
-            #     "quoteResponse": quote,
-            #     "userPublicKey": str(self.wallet.pubkey),
-            #     "wrapAndUnwrapSol": True
-            # }
-            # async with self.session.post(url, json=swap_data) as response:
-            #     if response.status != 200:
-            #         raise Exception(f"Swap API error: {await response.text()}")
-            #     swap_instructions = await response.json()
-            #
-            # # Step 3: Execute the transaction
-            # transaction = Transaction.from_instructions(swap_instructions)
-            # signature = await self.client.send_transaction(transaction, self.wallet)
-            
-            # Mock implementation for demonstration
-            # Simulate a small slippage
-            slippage = random.uniform(0, slippage_bps / 10000)  # Convert bps to percentage
-            actual_output = expected_output * (1 - slippage)
-            
-            # Simulate network delay
-            await asyncio.sleep(1)
-            
-            # Generate mock transaction ID
-            tx_id = f"jupiter_swap_{int(time.time())}_{random.randint(1000, 9999)}"
-            
-            # Return swap details
-            return {
-                "market": market,
-                "input_token": market.split("-")[0],
-                "output_token": market.split("-")[1],
-                "input_amount": input_amount,
-                "expected_output": expected_output,
-                "actual_output": actual_output,
-                "price": price,
-                "slippage_bps": slippage_bps,
-                "actual_slippage_pct": slippage * 100,
-                "tx_id": tx_id,
-                "status": "confirmed",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error executing swap for {market}: {e}")
-            raise
+        # Update to use Ultra API
+        config = {**self.ultra_config, "slippage_bps": slippage_bps}
+        return await self.execute_ultra_swap(market, input_amount, config)
     
     async def buy_with_usdc(self, token: str, usdc_amount: float) -> Dict:
         """
@@ -421,11 +548,23 @@ class JupiterAdapter:
             logger.info("Disconnecting from Jupiter API")
             self.connected = False
             self.client = None
+            if self._session and not self._session.closed:
+                await self._session.close()
+            self._session = None
+    
+    async def close(self):
+        """Close the adapter and cleanup resources"""
+        if hasattr(self, '_session') and self._session is not None:
+            await self._session.close()
+            self._session = None
+        logger.info("Closed Jupiter adapter session")
     
     def __del__(self):
         """
         Clean up resources when the adapter is garbage collected
         """
-        # Just clear properties since there's no persistent connection
+        if self._session and not self._session.closed:
+            asyncio.create_task(self._session.close())
         self.connected = False
         self.client = None
+        self._session = None

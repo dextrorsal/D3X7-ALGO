@@ -23,7 +23,7 @@ import asyncio
 from pathlib import Path
 
 # Add the project directory to the Python path
-project_dir = Path(__file__).resolve().parent
+project_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_dir))
 
 # Import the main function from your package
@@ -34,6 +34,9 @@ if __name__ == "__main__":
         # On Windows, use a different event loop policy to avoid issues
         if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
+        # Disable test mode globally
+        os.environ['DISABLE_TEST_MODE'] = '1'
         
         # Run the main async function
         asyncio.run(main())

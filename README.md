@@ -259,3 +259,162 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Documentation](docs/README.md)
 - [Issue Tracker](https://github.com/yourusername/crypto-data-fetcher/issues)
 - [Change Log](CHANGELOG.md)
+
+# Jupiter Ultra API Integration
+
+This project demonstrates a successful integration with Jupiter's Ultra API for optimal token swaps on Solana. The implementation includes both mainnet and devnet support, with comprehensive testing on the devnet using SOL-TEST pairs.
+
+## Features
+
+### 1. Jupiter Ultra API Integration
+- Uses the latest Ultra API endpoint (`https://api.jup.ag/ultra/v1`)
+- Supports both mainnet and devnet environments
+- Implements optimal swap routing with price impact consideration
+- Handles RFQ and Aggregator swap types
+
+### 2. Token Support
+- **Mainnet**:
+  - SOL (`So11111111111111111111111111111111111111112`)
+  - USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`)
+- **Devnet**:
+  - SOL (`So11111111111111111111111111111111111111112`)
+  - TEST (`7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs`)
+
+### 3. Price Data Integration
+- Uses Jupiter's Price API v4 for efficient price data
+- Supports real-time price updates
+- Implements price impact calculation
+
+### 4. Trading Features
+- Market price fetching
+- Order execution via Ultra API
+- Account balance management
+- Slippage control
+- Transaction signing and submission
+
+## Components
+
+### 1. Jupiter Adapter (`src/trading/jup/jup_adapter.py`)
+- Core adapter for Jupiter Ultra API integration
+- Handles API requests and responses
+- Manages wallet connections
+- Implements swap execution logic
+
+### 2. Exchange Handler (`src/exchanges/jup.py`)
+- Price data fetching and standardization
+- Candle data simulation for strategy testing
+- Integration with the broader exchange handler system
+
+### 3. Live Trader (`src/trading/jup/live_trader.py`)
+- Live trading implementation using Ultra API
+- Trade execution and management
+- Position tracking
+- Trade logging
+
+### 4. Live Strategy (`src/trading/jup/jup_live_strat.py`)
+- Strategy implementation using Ultra API
+- Price data processing
+- Signal generation
+- Indicator calculations
+
+## Testing
+
+### Ultra API Test Results
+Successfully tested the following functionality:
+1. Connection to Jupiter Ultra API
+2. Price data fetching
+3. Order quote retrieval
+4. Swap execution (devnet)
+
+Test output for SOL-TEST swap on devnet:
+```
+✓ Connected to Jupiter on devnet
+✓ Got order for 0.1 SOL -> TEST
+  Request ID: c069ad58-48b1-4948-9d6b-cf5e470584bc
+  Input amount: 100000000 SOL
+  Output amount: 669121 TEST
+  Price impact: 0%
+  Swap type: aggregator
+✓ Order includes transaction to sign
+✓ Successfully tested Jupiter Ultra API order functionality
+```
+
+## Setup
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd ultimate_data_fetcher
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+4. Run tests:
+```bash
+python -m src.trading.tests.jup.test_ultra_api
+```
+
+## Usage
+
+### Basic Swap Example
+```python
+from src.trading.jup.jup_adapter import JupiterAdapter
+
+async def example():
+    # Initialize adapter
+    adapter = JupiterAdapter(network="devnet")
+    
+    # Get quote for 0.1 SOL to TEST
+    quote = await adapter.get_ultra_quote(
+        market="SOL-TEST",
+        input_amount=0.1
+    )
+    
+    # Execute swap
+    result = await adapter.execute_swap(
+        market="SOL-TEST",
+        input_amount=0.1
+    )
+    
+    print(f"Swap executed: {result['signature']}")
+```
+
+### Price Data Example
+```python
+from src.exchanges.jup import JupiterHandler
+from src.core.config import Config
+
+async def example():
+    # Initialize handler
+    config = Config({"name": "jupiter"})
+    handler = JupiterHandler(config)
+    
+    # Get current SOL/USDC price
+    candle = await handler.fetch_live_candles(
+        market="SOL-USDC",
+        resolution="1m"
+    )
+    
+    print(f"Current SOL price: ${candle.close}")
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a new Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

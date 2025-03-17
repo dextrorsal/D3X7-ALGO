@@ -1,6 +1,6 @@
 """
 JupiterHandler for interacting with Jupiter's new API endpoints.
-Uses the price endpoint to fetch live price data and simulate a candle.
+Uses the Ultra API for price data and trading.
 """
 
 import logging
@@ -9,6 +9,7 @@ from typing import List
 import asyncio
 import pandas as pd
 from io import StringIO
+import aiohttp
 
 from src.core.models import StandardizedCandle, TimeRange
 from src.core.exceptions import ExchangeError, ValidationError
@@ -17,18 +18,23 @@ from src.exchanges.base import BaseExchangeHandler
 logger = logging.getLogger(__name__)
 
 class JupiterHandler(BaseExchangeHandler):
-    """Handler for Jupiter DEX using the new API endpoints."""
+    """Handler for Jupiter DEX using the Ultra API endpoints."""
 
     def __init__(self, config):
         """
         Initialize the Jupiter handler with the given configuration.
         """
         super().__init__(config)
-        # Here, self.config.base_url should be set from the config.
-        # For Jupiter, the new base for swap endpoints might be used for swaps,
-        # while the price endpoint is separate.
-        self.price_url = "https://api.jup.ag/price/v2"  # New price endpoint
-        logger.info(f"JupiterHandler initialized with base URL: {self.base_url} and price URL: {self.price_url}")
+        # Update to use Ultra API endpoints
+        self.ultra_api_url = "https://api.jup.ag/ultra/v1"
+        self.price_url = "https://price.jup.ag/v4/price"  # Price API v4
+        logger.info(f"JupiterHandler initialized with Ultra API URL: {self.ultra_api_url}")
+        
+        # Token addresses (same as in jup_adapter.py)
+        self.tokens = {
+            "SOL": "So11111111111111111111111111111111111111112",
+            "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        }
 
     async def fetch_historical_candles(
         self,
@@ -55,51 +61,47 @@ class JupiterHandler(BaseExchangeHandler):
         """
         # For "SOL-USDC", use the well-known mint addresses:
         if market.upper() == "SOL-USDC":
-            input_mint = "So11111111111111111111111111111111111111112"  # SOL
-            output_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC
+            input_mint = self.tokens["SOL"]
+            output_mint = self.tokens["USDC"]
         else:
             raise ValidationError(f"Market {market} not supported by JupiterHandler.")
 
-        # Prepare query parameters as per Jupiter's new API:
-        params = {
-            "inputMint": input_mint,
-            "outputMint": output_mint,
-            # Use a small amount (in base units) for price quotation.
-            "amount": 1000000,  # e.g. 1,000,000 base units
-            "slippageBps": 50  # 0.5% slippage tolerance
-        }
-
         try:
-            # Use the _make_request method inherited from BaseExchangeHandler.
-            # Note: Since _make_request in BaseExchangeHandler concatenates self.base_url with the endpoint,
-            # we pass the full price URL as the endpoint and leave self.base_url empty,
-            # or modify _make_request if necessary.
-            # For this example, we'll assume _make_request works with a full URL.
-            response = await self._make_request(method="GET", endpoint=self.price_url, params=params)
-            # Depending on the API response, you might need to adjust how you extract the price.
-            # For demonstration, assume the response is either a dict with a "price" key
-            # or a list of quotes, and we choose the first one.
-            if isinstance(response, list):
-                quote = response[0]
-            else:
-                quote = response
+            # Use the price API for efficient price data
+            params = {
+                "ids": input_mint,
+                "vsToken": output_mint
+            }
 
-            price = float(quote.get("price"))
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.price_url, params=params) as response:
+                    if response.status != 200:
+                        raise ExchangeError(f"Failed to fetch price data: {await response.text()}")
+                    
+                    data = await response.json()
+                    
+                    if "data" not in data or input_mint not in data["data"]:
+                        raise ExchangeError("Invalid price response format")
+                    
+                    price_data = data["data"][input_mint]
+                    price = float(price_data["price"])
+
+            # Construct a standardized candle using the current price
+            candle = StandardizedCandle(
+                timestamp=datetime.now(timezone.utc),
+                open=price,
+                high=price,
+                low=price,
+                close=price,
+                volume=0.0,  # Volume not provided by the price API
+                source="jupiter",
+                resolution=resolution,
+                market=market,
+                raw_data=data
+            )
+            
+            return candle
+                
         except Exception as e:
             logger.error(f"Error fetching live price from Jupiter: {e}")
             raise ExchangeError(f"Failed to fetch live price from Jupiter: {e}")
-
-        # Construct a standardized candle using the current price.
-        candle = StandardizedCandle(
-            timestamp=datetime.now(timezone.utc),
-            open=price,
-            high=price,
-            low=price,
-            close=price,
-            volume=0.0,  # Volume not provided by the price API
-            source="jupiter",
-            resolution=resolution,
-            market=market,
-            raw_data=response
-        )
-        return candle

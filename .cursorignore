@@ -3,3 +3,14 @@
 # Data sets
 #data/
 *.raw
+*.csv
+#*.json
+*.log
+*.rst
+*.rst
+#*.env
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz

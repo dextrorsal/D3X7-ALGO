@@ -12,7 +12,7 @@ import json
 import base64
 import os
 from pathlib import Path
-from src.utils.solana.sol_rpc import get_solana_client
+from src.utils.wallet.sol_rpc import get_solana_client
 
 client = get_solana_client()
 version_info = client.get_version()
