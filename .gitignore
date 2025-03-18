@@ -1,7 +1,42 @@
 # Sensitive directories
-/src/utils/wallet/
+/src/utils/wallet/*.json
+/src/utils/wallet/*.key
+/src/utils/wallet/wallets/
+/src/utils/wallet/backups/
 /config/
 /drift-git-examples/
+/src/utils/solana/
+/src/exchanges/auth/
+/src/trading/mainnet/sol_wallet.py
+/src/trading/tests/devnet/test_drift_auth.py
+
+# Security and keys
+*.key
+*.pem
+*.crt
+*.keystore
+*.jks
+*.p12
+*.pfx
+**/id.json
+**/*wallet*.json
+**/*keypair*.json
+**/keys.json
+**/secret*.json
+.env*
+.secret*
+credentials*.json
+config*.json
+
+# Mock and test files
+*_mock.py
+-*_mock.py
+/src/pytests/
+/test_data/
+/test_results/
+
+# Data fetching scripts (archived)
+/src/scripts/data_fetching/
 
 # Python
 __pycache__/
