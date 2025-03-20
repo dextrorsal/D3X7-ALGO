@@ -12,12 +12,9 @@ import json
 import base64
 import os
 from pathlib import Path
-from src.utils.wallet.sol_rpc import get_solana_client
-
-client = get_solana_client()
-version_info = client.get_version()
-print("Connected Solana node version:", version_info)
-
+from src.utils.wallet.sol_rpc import get_solana_client, get_network, NETWORK_URLS
+from src.utils.wallet.wallet_manager import WalletManager
+from solders.keypair import Keypair
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +24,18 @@ class DriftAdapter:
     Handles the specific logic for interacting with Drift smart contracts
     """
     
-    def __init__(self, config_path: str = None, keypair_path: str = None):
+    def __init__(self, config_path: str = None):
         """
         Initialize Drift adapter
         
         Args:
             config_path: Path to configuration file
-            keypair_path: Path to Solana keypair file
         """
         self.config_path = config_path
-        self.keypair_path = keypair_path
-        self.connected = False
         self.client = None
+        self.connected = False
         self.wallet = None
+        self.wallet_manager = WalletManager()
         
         # Market configuration
         self.markets = {
@@ -87,29 +83,36 @@ class DriftAdapter:
             True if successful, False otherwise
         """
         try:
-            # In a real implementation, this would import the necessary
-            # dependencies and connect to the Drift protocol using the
-            # official Drift Python SDK
+            # Get network configuration
+            network = get_network()
+            logger.info(f"Using network: {network}")
             
-            # Mock connection for demonstration
-            logger.info("Connecting to Drift protocol...")
+            # Initialize Solana client
+            self.client = await get_solana_client()
+            version_info = await self.client.get_version()
+            logger.info(f"Connected to Solana node version: {version_info}")
             
-            # Load keypair
-            if self.keypair_path and os.path.exists(self.keypair_path):
-                logger.info(f"Loading keypair from {self.keypair_path}")
-                # In a real implementation, this would load the keypair
-                # keypair = Keypair.from_file(self.keypair_path)
-                # self.wallet = keypair
+            # Load wallet using WalletManager
+            wallet = self.wallet_manager.get_current_wallet()
+            if not wallet:
+                raise Exception("No wallet loaded. Please set up a wallet first.")
+            
+            # Get keypair from wallet
+            if hasattr(wallet, 'keypair') and wallet.keypair:
+                if isinstance(wallet.keypair, bytes):
+                    self.wallet = Keypair.from_bytes(wallet.keypair)
+                else:
+                    self.wallet = wallet.keypair
             else:
-                logger.warning("No keypair file found, using mock wallet")
-                # Generate mock wallet with public key
-                self.wallet = {"pubkey": "DRiFtXXXmockXXXwalletXXXaddressXXX"}
+                raise Exception("No keypair available in wallet")
+            
+            logger.info(f"Loaded wallet: {self.wallet.pubkey()}")
             
             # Connect to Drift client
             # In a real implementation, this would initialize the Drift client
             # self.client = DriftClient(
             #     keypair=self.wallet,
-            #     env="mainnet"  # or "devnet" based on config
+            #     env=network  # Use configured network
             # )
             
             # Mock client for demonstration
@@ -119,7 +122,7 @@ class DriftAdapter:
             await asyncio.sleep(1)
             
             self.connected = True
-            logger.info("Connected to Drift protocol successfully")
+            logger.info(f"Connected to Drift protocol successfully on {network}")
             return True
             
         except Exception as e:

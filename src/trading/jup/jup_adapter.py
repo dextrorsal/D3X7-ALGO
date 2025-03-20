@@ -35,10 +35,7 @@ NETWORK_URLS = {
     "mainnet": "https://api.mainnet-beta.solana.com"
 }
 
-client = get_solana_client(DEFAULT_NETWORK)
-version_info = client.get_version()
-print(f"Connected Solana {DEFAULT_NETWORK} node version:", version_info)
-
+# Initialize client in connect() instead of at module level
 logger = logging.getLogger(__name__)
 
 # Token addresses for different networks
@@ -65,36 +62,16 @@ class JupiterAdapter:
         
         Args:
             config_path: Path to configuration file
-            keypair_path: Path to Solana keypair file (optional, will use PRIVATE_KEY_PATH from env if not provided)
-            network: Network to use ("devnet" or "mainnet", defaults to "devnet")
+            keypair_path: Path to Solana keypair file
+            network: Network to use (devnet or mainnet)
         """
         self.config_path = config_path
-        self.network = network.lower()
-        if self.network not in NETWORK_TOKENS:
-            raise ValueError(f"Invalid network: {network}. Must be one of: {', '.join(NETWORK_TOKENS.keys())}")
-            
-        # Use provided keypair_path or fall back to environment variable
-        self.keypair_path = keypair_path or os.getenv('PRIVATE_KEY_PATH')
-        if not self.keypair_path:
-            raise ValueError("No keypair path provided and PRIVATE_KEY_PATH not found in environment")
-            
+        self.keypair_path = keypair_path
+        self.network = network
         self.connected = False
         self.client = None
         self.wallet = None
         self._session = None
-        
-        # Load configuration if provided
-        if config_path and os.path.exists(config_path):
-            with open(config_path) as f:
-                config = json.load(f)
-                self.rpc_url = config.get('rpc_url', NETWORK_URLS[self.network])
-        else:
-            self.rpc_url = NETWORK_URLS[self.network]
-        
-        logger.info(f"Initializing Jupiter adapter on {self.network}")
-        
-        # API endpoints - Update to use the Ultra API endpoint
-        self.ultra_api_url = "https://api.jup.ag/ultra/v1"
         
         # Define supported token pairs based on network
         if self.network == "devnet":
@@ -128,22 +105,7 @@ class JupiterAdapter:
         
         self.tokens = NETWORK_TOKENS[self.network]
         self.base_url = "https://quote-api.jup.ag/v6"
-        self.client = get_solana_client(network)
-        self.wallet = get_wallet()
-        logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
-
-        # Test connection
-        version = self.client.get_version()
-        logger.info(f"Connected to Solana node version: {version}")
-        logger.info("Connected to Jupiter API successfully")
-    
-    @property
-    def session(self) -> aiohttp.ClientSession:
-        """Get or create an aiohttp session"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-    
+        
     async def connect(self) -> bool:
         """
         Connect to Jupiter
@@ -155,31 +117,13 @@ class JupiterAdapter:
             logger.info("Setting up Jupiter adapter...")
             
             # Initialize Solana client
-            self.client = AsyncClient(self.rpc_url, commitment=Commitment("confirmed"))
-            
-            # Load keypair
-            if not os.path.exists(self.keypair_path):
-                raise ValueError(f"Keypair file not found at: {self.keypair_path}")
-                
-            try:
-                logger.info(f"Loading keypair from {self.keypair_path}")
-                with open(self.keypair_path, 'r') as f:
-                    keypair_json = json.load(f)
-                    # Convert JSON array to bytes
-                    keypair_bytes = bytes(keypair_json)
-                    self.wallet = Keypair.from_bytes(keypair_bytes)
-                logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
-            except json.JSONDecodeError:
-                logger.info("Keypair file is not in JSON format, trying raw bytes...")
-                # Try reading as raw bytes in case it's not JSON
-                with open(self.keypair_path, 'rb') as f:
-                    keypair_bytes = f.read()
-                    self.wallet = Keypair.from_bytes(keypair_bytes)
-                logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
-            
-            # Test connection
+            self.client = await get_solana_client(self.network)
             version = await self.client.get_version()
-            logger.info(f"Connected to Solana node version: {version}")
+            logger.info(f"Connected to Solana {self.network} node version: {version}")
+            
+            # Initialize wallet
+            self.wallet = get_wallet()
+            logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
             
             self.connected = True
             logger.info("Connected to Jupiter API successfully")
@@ -189,6 +133,13 @@ class JupiterAdapter:
             logger.error(f"Failed to connect to Jupiter: {e}")
             self.connected = False
             return False
+    
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        """Get or create an aiohttp session"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
     
     async def get_market_price(self, market: str) -> float:
         """

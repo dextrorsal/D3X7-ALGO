@@ -10,6 +10,10 @@ This directory contains the core components for interacting with the Drift Proto
 │   ├── __init__.py        # Module exports
 │   ├── account_manager.py # Account management and balance tracking
 │   ├── drift_adapter.py   # Core Drift protocol interaction adapter
+│   ├── management/        # CLI and management tools
+│   │   ├── drift_cli.py           # CLI interface
+│   │   ├── drift_wallet_manager.py # Wallet management
+│   │   └── README.md              # Management tools documentation
 │   └── README.md         # This file
 ├── devnet/                # Devnet testing components
 │   ├── drift_auth.py     # Authentication for Drift (used by account_manager)
@@ -23,36 +27,24 @@ This directory contains the core components for interacting with the Drift Proto
 
 ## Quick Start
 
-The account manager can be run from the project root using the `manage_drift.py` wrapper:
+### Using the CLI Tools
 
+For detailed CLI usage and management tools, see the [Management Tools Documentation](management/README.md).
+
+Basic commands:
 ```bash
 # Show account balances
-python -m manage_drift balance
+./drift_cli.py account balance MAIN 0
 
-# Deposit SOL (with confirmation)
-python -m manage_drift deposit --token SOL --amount 0.1
+# List subaccounts
+./drift_cli.py subaccount list MAIN
 
-# Deposit SOL (without confirmation)
-python -m manage_drift deposit --token SOL --amount 0.1 --force
-
-# Withdraw SOL
-python -m manage_drift withdraw --token SOL --amount 0.1
+# Deposit SOL
+./drift_cli.py account deposit MAIN --token SOL --amount 0.1
 ```
 
-## Component Details
+### Using the Python API
 
-### 1. Account Manager (`account_manager.py`)
-
-Handles Drift account management, deposits, withdrawals, and balance tracking.
-
-**Key Features:**
-- SOL and USDC deposit/withdrawal handling
-- Real-time balance checking and display
-- PnL tracking and risk metrics
-- Collateral management
-- Safe transaction handling with confirmations
-
-**Usage Example:**
 ```python
 from src.trading.drift.account_manager import DriftAccountManager
 
@@ -71,6 +63,19 @@ async def example():
         await manager.drift_client.unsubscribe()
 ```
 
+## Component Details
+
+### 1. Account Manager (`account_manager.py`)
+
+Handles Drift account management, deposits, withdrawals, and balance tracking.
+
+**Key Features:**
+- SOL and USDC deposit/withdrawal handling
+- Real-time balance checking and display
+- PnL tracking and risk metrics
+- Collateral management
+- Safe transaction handling with confirmations
+
 ### 2. Drift Adapter (`drift_adapter.py`)
 
 Core adapter for interacting with Drift Protocol's smart contracts.
@@ -81,36 +86,15 @@ Core adapter for interacting with Drift Protocol's smart contracts.
 - Order placement and execution
 - Market configuration handling
 
-**Supported Markets:**
-```python
-# Perpetual Markets
-- SOL-PERP (index: 0)
-- BTC-PERP (index: 1)
-- ETH-PERP (index: 2)
+### 3. Management Tools (`management/`)
 
-# Spot Markets
-- SOL-USDC (index: 0)
-- BTC-USDC (index: 1)
-- ETH-USDC (index: 2)
-```
+CLI and management tools for Drift operations. Features include:
+- Secure wallet management with encryption
+- Subaccount creation and management
+- Balance checking and transfers
+- Interactive CLI interface
 
-**Usage Example:**
-```python
-from src.trading.drift.drift_adapter import DriftAdapter
-
-async def example():
-    adapter = DriftAdapter()
-    await adapter.connect()
-    
-    try:
-        # Get market price
-        sol_price = await adapter.get_market_price("SOL-PERP")
-        
-        # Check balances
-        balances = await adapter.get_account_balances()
-    finally:
-        await adapter.disconnect()
-```
+For detailed documentation of management features, see the [Management README](management/README.md).
 
 ## Environment Setup
 
@@ -123,46 +107,30 @@ pip install driftpy anchorpy solana-py solders
 The system uses environment variables and configuration files:
 
 1. **Required Environment Variables:**
-   - `HELIUS_RPC_URL`: Your Helius RPC endpoint
-   - `WALLET_PATH`: Path to your Solana wallet keypair
-
-2. **Transaction Parameters:**
-   ```python
-   tx_params = TxParams(
-       compute_units_price=85_000,  # Default
-       compute_units=1_400_000      # Default
-   )
+   ```bash
+   ENABLE_ENCRYPTION=true    # Enable wallet encryption
+   WALLET_PASSWORD=<secure>  # Wallet encryption password
    ```
 
-## Testing
-
-Tests are organized in two directories:
-
-1. `/src/trading/tests/drift/`: Main test suite
-   - Tests core functionality
-   - Uses mainnet configuration
-   - Full integration tests
-
-2. `/src/trading/tests/devnet/`: Devnet test suite
-   - Tests with devnet configuration
-   - Safer for experimental features
-   - Uses test tokens
-
-To run tests:
-```bash
-
-# Run devnet tests
-python -m pytest src/trading/tests/devnet/test_drift_account_manager.py
-```
+2. **Optional Environment Variables:**
+   ```bash
+   DRIFT_LOG_LEVEL=DEBUG    # Enable detailed logging
+   DRIFT_NETWORK=devnet     # Network selection
+   ```
 
 ## Security Best Practices
 
-1. **Transaction Safety:**
-   - Always use confirmation prompts for deposits/withdrawals
+1. **Wallet Security:**
+   - Always use encrypted wallet files
+   - Store passwords securely
+   - Use the CLI's confirmation prompts
+
+2. **Transaction Safety:**
    - Verify balances before transactions
    - Use the `--force` flag carefully
+   - Monitor position risks
 
-2. **Error Handling:**
+3. **Error Handling:**
    ```python
    try:
        await manager.deposit_sol(amount)
@@ -171,11 +139,6 @@ python -m pytest src/trading/tests/devnet/test_drift_account_manager.py
    finally:
        await manager.drift_client.unsubscribe()
    ```
-
-3. **Resource Management:**
-   - Always clean up connections
-   - Handle subscription lifecycle
-   - Monitor position risks
 
 ## Integration with Other Components
 
@@ -207,3 +170,5 @@ Common issues and solutions:
    - Check account balances
    - Verify market indices
    - Monitor compute unit limits
+
+For CLI-specific troubleshooting, see the [Management Tools Documentation](management/README.md).

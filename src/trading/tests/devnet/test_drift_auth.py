@@ -6,6 +6,7 @@ Test script for Drift authentication.
 import asyncio
 import logging
 import os
+import json
 from dotenv import load_dotenv
 
 from src.core.models import ExchangeCredentials
@@ -27,12 +28,20 @@ async def test_drift_auth():
     Test the Drift authentication module.
     """
     # Get credentials from environment variables
-    private_key = os.getenv("DRIFT_PRIVATE_KEY")
+    private_key_path = os.getenv("DRIFT_PRIVATE_KEY_PATH")
     program_id = os.getenv("DRIFT_PROGRAM_ID", "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH")
-    rpc_url = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")
+    rpc_url = os.getenv("DEVNET_RPC_ENDPOINT", "https://api.devnet.solana.com")  # Always use devnet for testing
     
-    if not private_key:
-        logger.error("DRIFT_PRIVATE_KEY not found in environment variables")
+    if not private_key_path:
+        logger.error("DRIFT_PRIVATE_KEY_PATH not found in environment variables")
+        return
+        
+    try:
+        # Read private key from file
+        with open(os.path.expanduser(private_key_path), 'r') as f:
+            private_key = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to read private key file: {e}")
         return
     
     logger.info(f"Using RPC URL: {rpc_url}")

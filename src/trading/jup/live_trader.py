@@ -15,10 +15,6 @@ from types import SimpleNamespace
 import pandas as pd
 from src.utils.wallet.sol_rpc import get_solana_client
 
-client = get_solana_client()
-version_info = client.get_version()
-print("Connected Solana node version:", version_info)
-
 from src.core.config import Config
 from src.core.models import TimeRange, StandardizedCandle
 from src.core.exceptions import ExchangeError, ValidationError
@@ -31,22 +27,23 @@ logger = logging.getLogger(__name__)
 
 class LiveTrader:
     """
-    Live trading implementation for executing trades based on strategy signals
-    Uses Jupiter Ultra API for optimal token swaps
+    Live trading implementation for DEX exchanges
+    Handles real-time data streaming and trade execution
     """
-
+    
     def __init__(self, config: Config, strategy: BaseStrategy, exchange_name: str = "jupiter"):
         """
-        Initialize live trader with configuration
+        Initialize live trader
         
         Args:
-            config: Configuration object
-            strategy: Trading strategy to generate signals
-            exchange_name: Name of exchange to use (drift or jupiter)
+            config: Trading configuration
+            strategy: Trading strategy instance
+            exchange_name: Name of exchange to use
         """
         self.config = config
         self.strategy = strategy
         self.exchange_name = exchange_name.lower()
+        self.client = None
 
         # Initialize Jupiter adapter for Ultra API
         if self.exchange_name == "jupiter":
@@ -89,6 +86,46 @@ class LiveTrader:
         self.trade_log_file = self.log_dir / f"trade_log_{datetime.now().strftime('%Y%m%d')}.json"
         
         logger.info(f"Initialized LiveTrader with {exchange_name}")
+            
+    async def connect(self) -> bool:
+        """
+        Connect to the exchange and initialize required components
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Initialize Solana client
+            self.client = await get_solana_client()
+            version_info = await self.client.get_version()
+            logger.info(f"Connected to Solana node version: {version_info}")
+            
+            # Initialize Jupiter adapter for Ultra API
+            if self.exchange_name == "jupiter":
+                self.jupiter = JupiterAdapter(
+                    config_path=self.config.get("jupiter", {}).get("config_path"),
+                    network=self.config.get("jupiter", {}).get("network", "mainnet")
+                )
+                await self.jupiter.connect()
+            else:
+                from src.exchanges import get_exchange_handler
+                exchange_config = self.config.get("data_sources", {}).get(self.exchange_name)
+                if not exchange_config:
+                    raise ValueError(f"Exchange {self.exchange_name} not configured")
+
+                # Inject the exchange name into the dictionary
+                exchange_config["name"] = self.exchange_name
+
+                # Wrap the dictionary into an object that supports attribute access
+                exchange_config_obj = SimpleNamespace(**exchange_config)
+                self.exchange_handler = get_exchange_handler(exchange_config_obj)
+                await self.exchange_handler.connect()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to connect: {e}")
+            return False
             
     async def get_account_balances(self) -> Dict[str, float]:
         """

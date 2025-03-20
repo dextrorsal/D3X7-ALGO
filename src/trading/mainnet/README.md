@@ -8,6 +8,8 @@ This directory contains components for interacting with Solana's mainnet, focusi
 mainnet/
 ├── __init__.py       - Module exports
 ├── sol_wallet.py     - Solana wallet interface (5.7KB)
+├── security_limits.py       - Trading security controls
+├── test_security_limits.py  - Security test suite
 └── README.md        - This file
 ```
 
@@ -48,6 +50,113 @@ signature = wallet.sign_message("Hello Solana")
 
 # Create new keypair
 pubkey, privkey = SolanaWallet.create_new_keypair("new_wallet.json")
+```
+
+### `security_limits.py` & Testing Framework 🛡️
+
+Our enhanced security framework for mainnet trading with comprehensive testing.
+
+**Key Security Features:**
+1. **Position Management:**
+   - Market-specific position size limits
+   - Default limits for new markets
+   - Real-time position validation
+
+2. **Risk Controls:**
+   - Leverage limits per market
+   - Daily volume tracking
+   - Emergency shutdown triggers
+   - Loss threshold monitoring
+
+3. **Emergency Controls:**
+   - Automatic trading suspension
+   - Volume spike detection
+   - Maximum drawdown protection
+   - Manual override capabilities
+
+### Visual Test Suite 🎨
+
+The `test_security_limits.py` provides a beautiful, color-coded testing interface for security validations.
+
+**Running Tests:**
+```bash
+# Install required package
+pip install colorama
+
+# Run the test suite
+python3 test_security_limits.py
+```
+
+**Test Output Features:**
+```
+🚀 Running Security Limits Test Suite
+=====================================
+✅ Position Size Limits
+  ├── Market-specific limits
+  ├── Default market handling
+  └── Size validation
+
+✅ Leverage Controls
+  ├── Per-market limits
+  └── Default leverage rules
+
+✅ Volume Tracking
+  ├── Daily limits
+  ├── Volume spikes
+  └── Reset functionality
+
+✅ Emergency Systems
+  ├── Loss thresholds
+  ├── Trading suspension
+  └── Manual overrides
+```
+
+**Test Categories:**
+1. **Position Size Testing:**
+   - Validates market-specific limits
+   - Tests default market behavior
+   - Ensures proper size restrictions
+
+2. **Leverage Validation:**
+   - Verifies per-market leverage limits
+   - Tests leverage calculation accuracy
+   - Confirms default rules application
+
+3. **Volume Control Testing:**
+   - Daily volume limit enforcement
+   - Volume spike detection
+   - Automatic reset verification
+
+4. **Emergency Systems:**
+   - Loss threshold triggers
+   - Trading suspension mechanics
+   - Override functionality
+
+**Visual Indicators:**
+- ✅ Passed Tests (Green)
+- ❌ Failed Tests (Red)
+- ⚠️ Warnings (Yellow)
+- 🔧 Setup Operations (Blue)
+- 🧹 Cleanup Operations (Blue)
+
+**Test Configuration:**
+```python
+# Example test configuration
+{
+    "max_position_size": {
+        "SOL-PERP": 2.0,
+        "BTC-PERP": 0.05
+    },
+    "max_leverage": {
+        "SOL-PERP": 3,
+        "BTC-PERP": 2
+    },
+    "daily_volume_limit": 5.0,
+    "emergency_shutdown_triggers": {
+        "loss_threshold_pct": 3.0,
+        "volume_spike_multiplier": 2.0
+    }
+}
 ```
 
 ## Configuration
@@ -94,6 +203,15 @@ SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"  # Custom RPC endpoint
    - Keep sensitive data out of code
    - Rotate keys regularly
 
+4. **Testing Practices:**
+   ```python
+   # GOOD: Regular test execution
+   python3 test_security_limits.py
+   
+   # BETTER: Include in CI/CD pipeline
+   pytest test_security_limits.py --html=report.html
+   ```
+
 ## Integration Points
 
 ### With Jupiter Aggregator
@@ -106,6 +224,11 @@ SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"  # Custom RPC endpoint
 - Position handling
 - Collateral verification
 
+### With Security Testing
+- Automated validation
+- Risk control verification
+- Emergency system testing
+
 ## Error Handling
 
 ```python
@@ -117,17 +240,6 @@ except ValueError as e:
 except Exception as e:
     logger.error(f"Unexpected error: {e}")
 ```
-
-## Dependencies
-
-1. **Required:**
-   - `solana`: Solana web3 library
-   - `base64`: Encoding utilities
-   - `python-dotenv`: Environment management
-
-2. **Optional:**
-   - `logging`: Error tracking
-   - `typing`: Type hints
 
 ## Development Guidelines
 
@@ -145,6 +257,12 @@ except Exception as e:
    - Keep dependencies updated
    - Monitor for vulnerabilities
    - Back up keypairs securely
+
+4. **Testing Guidelines:**
+   - Run security tests before deployment
+   - Verify all limits are properly set
+   - Test emergency procedures regularly
+   - Document test results
 
 ## Common Operations
 
@@ -172,6 +290,15 @@ except Exception as e:
    })
    ```
 
+4. **Running Security Tests:**
+   ```bash
+   # Full test suite
+   python3 test_security_limits.py
+   
+   # Individual test categories
+   python3 -m unittest test_security_limits.TestSecurityLimits.test_position_size_limits
+   ```
+
 ## Notes
 
 - All operations target Solana mainnet
@@ -179,6 +306,9 @@ except Exception as e:
 - Requires proper key management
 - Supports versioned transactions
 - Implements best security practices
+- Regular security testing required
+- Test results should be logged
+- Keep test configuration updated
 
 ## Troubleshooting
 
@@ -196,3 +326,9 @@ except Exception as e:
    - Review access logs
    - Check for unauthorized access
    - Monitor transaction history
+
+4. **Test Failures:**
+   - Check test configuration
+   - Verify security parameters
+   - Review recent changes
+   - Check log outputs
