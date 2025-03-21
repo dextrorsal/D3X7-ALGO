@@ -121,7 +121,10 @@ class DriftHandler(BaseExchangeHandler):
                 # Load user's keypair
                 keypair_path = os.getenv("PRIVATE_KEY_PATH")
                 if not keypair_path:
-                    raise ExchangeError("PRIVATE_KEY_PATH environment variable not set")
+                    # Try alternative key paths
+                    keypair_path = os.getenv("MAIN_KEY_PATH") or os.getenv("KP_KEY_PATH") or os.getenv("AG_KEY_PATH")
+                    if not keypair_path:
+                        raise ExchangeError("No key path environment variable found. Please set PRIVATE_KEY_PATH, MAIN_KEY_PATH, KP_KEY_PATH, or AG_KEY_PATH")
                 
                 try:
                     with open(keypair_path, 'r') as f:
@@ -158,7 +161,7 @@ class DriftHandler(BaseExchangeHandler):
             except Exception as e:
                 delay = min(self._retry_config['base_delay'] * (2 ** attempt),
                           self._retry_config['max_delay'])
-                logger.warning(f"Connection attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s...")
                 await asyncio.sleep(delay)
         
         raise ExchangeError("Failed to initialize connection after multiple attempts")

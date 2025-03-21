@@ -21,7 +21,7 @@ from src.core.models import StandardizedCandle, TimeRange
 from src.exchanges.base import BaseExchangeHandler
 from src.core.exceptions import ExchangeError, ValidationError, RateLimitError
 from src.core.symbol_mapper import SymbolMapper
-from src.utils.time_utils import (
+from src.core.time_utils import (
     convert_timestamp_to_datetime,
     get_current_timestamp,
     get_timestamp_from_datetime,
