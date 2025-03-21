@@ -129,7 +129,7 @@ class JupiterAdapter:
             logger.info(f"Connected to Solana {self.network} node version: {version}")
             
             # Initialize wallet
-            self.wallet = get_wallet()
+            self.wallet = await get_wallet()
             logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
             
             self.connected = True

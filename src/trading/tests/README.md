@@ -86,3 +86,48 @@ Required environment variables:
 - `WALLET_PASSWORD`: For encryption/decryption tests
 
 For detailed documentation on writing tests, best practices, and troubleshooting, see the main [Trading Documentation](../README.md#testing).
+
+## Jupiter Integration Tests
+
+Jupiter integration tests validate the swap functionality and security features for the Jupiter DEX integration. These tests ensure that:
+
+1. The Jupiter adapter connects properly to the Solana network
+2. Market price retrieval works correctly
+3. Account balance retrieval functions properly
+4. Security validations work for swap sizes and slippage
+5. Quote retrieval for swaps works as expected
+6. Route options can be retrieved for optimal swaps
+
+### Running Jupiter Integration Tests
+
+To run all Jupiter integration tests:
+
+```bash
+cd /home/dex/D3X7-ALGO && python -m pytest src/trading/tests/integration/devnet/test_jupiter_integration.py -v
+```
+
+To run a specific Jupiter test:
+
+```bash
+cd /home/dex/D3X7-ALGO && python -m pytest src/trading/tests/integration/devnet/test_jupiter_integration.py::TestJupiterIntegration::test_market_price -v
+```
+
+To run the Jupiter security integration test:
+
+```bash
+cd /home/dex/D3X7-ALGO && python -m pytest src/trading/tests/integration/devnet/test_security_integration.py::TestSecurityIntegration::test_jupiter_swap_security -v
+```
+
+### Test Coverage
+
+The Jupiter integration tests cover:
+
+- Basic connectivity to Jupiter API
+- Market price retrieval
+- Account balance retrieval
+- Swap quote retrieval
+- Security validation for swap sizes
+- Security validation for slippage
+- Route option retrieval
+
+Note: The actual swap execution test is skipped by default to avoid spending SOL. You can enable it by removing the `skipif` decorator if you want to test actual swaps on devnet.

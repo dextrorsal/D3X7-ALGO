@@ -331,6 +331,76 @@ class SecurityLimits:
         except Exception as e:
             logger.error(f"Failed to log trade: {e}")
 
+    def validate_swap_size(self, market: str, usd_value: float) -> bool:
+        """
+        Validate if a token swap size is within limits.
+        
+        Args:
+            market: Market symbol (e.g., "SOL-USDC")
+            usd_value: USD value of the swap
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        if self.emergency_shutdown:
+            logger.error("Emergency shutdown active - no swaps allowed")
+            return False
+        
+        # Default max swap size in USD
+        default_max_swap_size_usd = 100.0  # $100 
+        
+        # Get market-specific limit if available
+        # First try to get from max_swap_size if defined
+        if "max_swap_size" in self.limits:
+            max_swap_size = self.limits["max_swap_size"].get(
+                market, 
+                self.limits["max_swap_size"].get("default", default_max_swap_size_usd)
+            )
+        else:
+            # Fall back to max_position_size (treating swap similarly to position size)
+            max_swap_size = self.limits["max_position_size"].get(
+                market, 
+                self.limits["max_position_size"]["default"]
+            )
+            # Convert to USD value using a rough approximation
+            # This is a simplification - in production you'd use current market prices
+            if market.startswith("SOL"):
+                max_swap_size *= 80  # Approximate SOL price in USD
+            elif market.startswith("BTC"):
+                max_swap_size *= 40000  # Approximate BTC price
+            elif market.startswith("ETH"):
+                max_swap_size *= 2000  # Approximate ETH price
+            else:
+                max_swap_size *= 50  # Generic approximation
+        
+        if usd_value > max_swap_size:
+            logger.warning(
+                f"Swap value ${usd_value} exceeds maximum allowed ${max_swap_size} for {market}"
+            )
+            return False
+            
+        return True
+        
+    def validate_slippage(self, slippage_bps: int) -> bool:
+        """
+        Validate if slippage is within limits.
+        
+        Args:
+            slippage_bps: Slippage in basis points (1% = 100 bps)
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        max_slippage = self.limits.get("slippage_bps", 300)  # Default to 3%
+        
+        if slippage_bps > max_slippage:
+            logger.warning(
+                f"Slippage {slippage_bps/100}% exceeds maximum allowed {max_slippage/100}%"
+            )
+            return False
+            
+        return True
+
 # This function doesn't enforce limits, but passes them through for APIs that handle it themselves
 def get_api_parameters(security_limits: SecurityLimits) -> Dict[str, Any]:
     """

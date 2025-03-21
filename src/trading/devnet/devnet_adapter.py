@@ -29,6 +29,7 @@ from driftpy.types import TxParams
 
 from src.utils.wallet.wallet_manager import WalletManager
 from src.utils.wallet.sol_rpc import get_solana_client
+from src.trading.security.security_manager import SecurityManager
 
 # Load environment variables
 load_dotenv()
@@ -86,6 +87,7 @@ class DevnetAdapter:
         self.wallet_manager = WalletManager()
         self.solana_client = None
         self.drift_client = None
+        self.security_manager = SecurityManager()
         
         # Default transaction parameters
         self.tx_params = TxParams(
@@ -982,6 +984,68 @@ class DevnetAdapter:
                 logger.info("Solana client closed")
             except Exception as e:
                 logger.error(f"Error closing Solana client: {str(e)}")
+
+    def perform_security_audit(self) -> Dict[str, Any]:
+        """
+        Perform a security audit of the system configuration
+        Returns audit results
+        """
+        return self.security_manager.perform_security_audit()
+        
+    async def place_order(self, order_params, market_name=None, value=0.0) -> Dict[str, Any]:
+        """
+        Place an order on the Drift exchange
+        
+        Args:
+            order_params: The OrderParams object
+            market_name: Name of the market
+            value: Value of the order
+            
+        Returns:
+            Dict with transaction information
+        """
+        if not self.drift_client:
+            raise Exception("Drift client not initialized. Call initialize_drift() first")
+            
+        try:
+            # Confirm transaction if needed
+            tx_details = {
+                'type': 'place_order',
+                'market': market_name,
+                'size': order_params.base_asset_amount,
+                'price': order_params.price,
+                'value': value
+            }
+            
+            # Update last activity
+            self.security_manager.update_activity()
+            
+            # Check for session timeout
+            if time.time() - self.security_manager.last_activity_time > self.security_manager.session_timeout:
+                raise Exception("Session timed out. Please reconnect.")
+                
+            # Request confirmation if needed
+            if not await self.security_manager.confirm_transaction(tx_details):
+                logger.warning("Transaction rejected by user")
+                return None
+                
+            logger.info(f"Placing order on {market_name}...")
+            
+            # This is a mock implementation for testing
+            # In a real implementation, we would call the drift_client.place_order method
+            
+            return {
+                "success": True,
+                "txid": "mock_tx_id_" + str(int(time.time())),
+                "market": market_name,
+                "size": order_params.base_asset_amount,
+                "price": order_params.price,
+                "value": value
+            }
+            
+        except Exception as e:
+            logger.error(f"Error placing order: {str(e)}")
+            raise
 
 async def main():
     """Example usage of DevnetAdapter"""
