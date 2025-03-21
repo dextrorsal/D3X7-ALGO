@@ -14,10 +14,10 @@ import aiohttp
 
 from src.core.models import StandardizedCandle, TimeRange
 from src.exchanges.base import BaseExchangeHandler
-from src.utils.time_utils import (
+from src.core.time_utils import (
     convert_timestamp_to_datetime,
-    get_current_timestamp,
     get_timestamp_from_datetime,
+    get_current_timestamp
 )
 from src.core.exceptions import ExchangeError, ValidationError, RateLimitError
 

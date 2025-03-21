@@ -1,60 +1,50 @@
 # Trading Mainnet Directory
 
-This directory contains components for interacting with Solana's mainnet, focusing on secure wallet management and transaction handling for live trading.
+This directory contains components for secure mainnet trading on Solana, with comprehensive security controls, position monitoring, and trade execution capabilities.
 
 ## Directory Structure
 
 ```
 mainnet/
-├── __init__.py       - Module exports
-├── sol_wallet.py     - Solana wallet interface (5.7KB)
-├── security_limits.py       - Trading security controls
-├── test_security_limits.py  - Security test suite
-└── README.md        - This file
+├── __init__.py                 - Module exports
+├── mainnet_trade.py           - Main trading interface
+├── security_limits.py         - Trading security controls
+├── drift_position_monitor.py  - Real-time position monitoring
+└── README.md                  - This documentation
 ```
 
 ## Component Details
 
-### `sol_wallet.py`
+### `mainnet_trade.py`
 
-Core wallet management system for Solana mainnet operations.
+Comprehensive trading interface for executing trades on Solana mainnet with security controls.
 
 **Key Features:**
-1. **Wallet Management:**
-   - Keypair loading and creation
-   - Transaction signing
-   - Message signing
-   - Public key management
+1. **Trade Execution:**
+   - Drift perpetual market trades
+   - Jupiter token swaps
+   - Position monitoring integration
 
-2. **Security:**
-   - Environment variable support
-   - Multiple key loading methods
-   - Secure keypair handling
-   - Error handling and logging
+2. **Security Integration:**
+   - Size limits enforcement
+   - Risk controls
+   - Trade logging and analytics
 
 **Usage Example:**
-```python
-from src.trading.mainnet import SolanaWallet
+```bash
+# Execute Drift trade
+python3 mainnet_trade.py drift --market SOL-PERP --size 1.0 --side buy --type market
 
-# Initialize wallet
-wallet = SolanaWallet(keypair_path="~/.config/solana/id.json")
+# Execute Jupiter swap
+python3 mainnet_trade.py jupiter --market SOL-USDC --amount 1.0 --slippage 100
 
-# Get public key
-pubkey = wallet.get_public_key()
-
-# Sign a transaction
-signed_tx = wallet.sign_transaction(transaction_data)
-
-# Sign a message
-signature = wallet.sign_message("Hello Solana")
-
-# Create new keypair
-pubkey, privkey = SolanaWallet.create_new_keypair("new_wallet.json")
+# Start position monitoring
+python3 mainnet_trade.py monitor
 ```
 
-### `security_limits.py` & Testing Framework 🛡️
+### `security_limits.py` 🛡️
 
-Our enhanced security framework for mainnet trading with comprehensive testing.
+Enhanced security framework for mainnet trading with comprehensive controls.
 
 **Key Security Features:**
 1. **Position Management:**
@@ -74,74 +64,42 @@ Our enhanced security framework for mainnet trading with comprehensive testing.
    - Maximum drawdown protection
    - Manual override capabilities
 
-### Visual Test Suite 🎨
+### `drift_position_monitor.py` 📊
 
-The `test_security_limits.py` provides a beautiful, color-coded testing interface for security validations.
+Real-time position monitoring system with advanced analytics.
 
-**Running Tests:**
+**Key Features:**
+1. **Position Tracking:**
+   - Real-time position updates
+   - PnL monitoring
+   - Risk metrics calculation
+
+2. **Market Making Metrics:**
+   - Spread analysis
+   - Inventory skew tracking
+   - Order book imbalance
+   - Market impact estimation
+
+3. **Performance Analytics:**
+   - ROI tracking
+   - Volume analysis
+   - Funding payment tracking
+   - Win rate calculation
+
+## Configuration
+
+### Environment Variables
 ```bash
-# Install required package
-pip install colorama
+# Required
+MAINNET_RPC_ENDPOINT="https://..."  # Mainnet RPC endpoint
+WALLET_PASSWORD="..."               # Wallet encryption password
 
-# Run the test suite
-python3 test_security_limits.py
+# Optional
+DRIFT_NETWORK="mainnet-beta"       # Drift network (default: mainnet-beta)
 ```
 
-**Test Output Features:**
-```
-🚀 Running Security Limits Test Suite
-=====================================
-✅ Position Size Limits
-  ├── Market-specific limits
-  ├── Default market handling
-  └── Size validation
-
-✅ Leverage Controls
-  ├── Per-market limits
-  └── Default leverage rules
-
-✅ Volume Tracking
-  ├── Daily limits
-  ├── Volume spikes
-  └── Reset functionality
-
-✅ Emergency Systems
-  ├── Loss thresholds
-  ├── Trading suspension
-  └── Manual overrides
-```
-
-**Test Categories:**
-1. **Position Size Testing:**
-   - Validates market-specific limits
-   - Tests default market behavior
-   - Ensures proper size restrictions
-
-2. **Leverage Validation:**
-   - Verifies per-market leverage limits
-   - Tests leverage calculation accuracy
-   - Confirms default rules application
-
-3. **Volume Control Testing:**
-   - Daily volume limit enforcement
-   - Volume spike detection
-   - Automatic reset verification
-
-4. **Emergency Systems:**
-   - Loss threshold triggers
-   - Trading suspension mechanics
-   - Override functionality
-
-**Visual Indicators:**
-- ✅ Passed Tests (Green)
-- ❌ Failed Tests (Red)
-- ⚠️ Warnings (Yellow)
-- 🔧 Setup Operations (Blue)
-- 🧹 Cleanup Operations (Blue)
-
-**Test Configuration:**
-```python
-# Example test configuration
+### Security Configuration
+```json
 {
     "max_position_size": {
         "SOL-PERP": 2.0,
@@ -159,176 +117,90 @@ python3 test_security_limits.py
 }
 ```
 
-## Configuration
-
-### 1. Environment Variables
-```bash
-# Required
-PRIVATE_KEY_PATH="/path/to/keypair.json"  # Path to keypair file
-# OR
-PRIVATE_KEY="[...]"  # Direct private key (JSON array or base58)
-
-# Optional
-SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"  # Custom RPC endpoint
-```
-
-### 2. Keypair Formats
-1. **JSON File:**
-   ```json
-   [1,2,3,...,64]  // 64-byte array
-   ```
-
-2. **Environment Variable:**
-   - JSON array
-   - Base58-encoded string
-
-## Security Best Practices
-
-1. **Private Key Management:**
-   ```python
-   # GOOD: Load from environment or secure file
-   wallet = SolanaWallet(keypair_path=os.getenv("PRIVATE_KEY_PATH"))
-   
-   # BAD: Hardcode private key
-   wallet = SolanaWallet(keypair_path="my_private_key.json")
-   ```
-
-2. **File Permissions:**
-   - Set restrictive permissions on keypair files
-   - Use secure directories
-   - Never commit private keys
-
-3. **Environment Variables:**
-   - Use `.env` files
-   - Keep sensitive data out of code
-   - Rotate keys regularly
-
-4. **Testing Practices:**
-   ```python
-   # GOOD: Regular test execution
-   python3 test_security_limits.py
-   
-   # BETTER: Include in CI/CD pipeline
-   pytest test_security_limits.py --html=report.html
-   ```
-
 ## Integration Points
 
-### With Jupiter Aggregator
-- Transaction signing for swaps
-- Balance verification
-- Order execution
-
 ### With Drift Protocol
-- Account management
-- Position handling
-- Collateral verification
+- Perpetual market trading
+- Position management
+- Risk monitoring
 
-### With Security Testing
-- Automated validation
-- Risk control verification
-- Emergency system testing
-
-## Error Handling
-
-```python
-try:
-    wallet = SolanaWallet()
-    signed_tx = wallet.sign_transaction(tx_data)
-except ValueError as e:
-    logger.error(f"Wallet error: {e}")
-except Exception as e:
-    logger.error(f"Unexpected error: {e}")
-```
+### With Jupiter Aggregator
+- Token swaps
+- Price discovery
+- Route optimization
 
 ## Development Guidelines
 
 1. **Testing:**
    - Use devnet for testing
    - Never test with real funds
-   - Verify signatures offline
+   - Verify security limits
 
 2. **Deployment:**
    - Double-check RPC endpoints
-   - Verify network connections
-   - Monitor transaction status
+   - Verify security settings
+   - Monitor initial trades
 
 3. **Maintenance:**
-   - Keep dependencies updated
-   - Monitor for vulnerabilities
-   - Back up keypairs securely
+   - Regular security audits
+   - Update limits as needed
+   - Monitor system health
 
-4. **Testing Guidelines:**
-   - Run security tests before deployment
-   - Verify all limits are properly set
-   - Test emergency procedures regularly
-   - Document test results
+## Error Handling
 
-## Common Operations
+The system implements comprehensive error handling:
+```python
+try:
+    # Execute trade with security checks
+    result = await trading.execute_drift_trade(
+        market="SOL-PERP",
+        size=1.0,
+        side="buy"
+    )
+except SecurityLimitError as e:
+    logger.error(f"Security limit exceeded: {e}")
+except TradeExecutionError as e:
+    logger.error(f"Trade execution failed: {e}")
+```
 
-1. **Creating New Wallets:**
-   ```python
-   # Generate new keypair
-   pubkey, privkey = SolanaWallet.create_new_keypair("new_wallet.json")
-   ```
+## Monitoring and Alerts
 
-2. **Loading Existing Wallets:**
-   ```python
-   # From file
-   wallet = SolanaWallet(keypair_path="existing_wallet.json")
-   
-   # From environment
-   wallet = SolanaWallet()  # Uses PRIVATE_KEY or PRIVATE_KEY_PATH
-   ```
+1. **Position Alerts:**
+   - Size limit breaches
+   - Leverage warnings
+   - PnL thresholds
 
-3. **Transaction Signing:**
-   ```python
-   # Sign transaction
-   signed = wallet.sign_transaction({
-       "recent_blockhash": "...",
-       "instructions": [...]
-   })
-   ```
+2. **System Alerts:**
+   - Emergency shutdowns
+   - Volume spikes
+   - Connection issues
 
-4. **Running Security Tests:**
-   ```bash
-   # Full test suite
-   python3 test_security_limits.py
-   
-   # Individual test categories
-   python3 -m unittest test_security_limits.TestSecurityLimits.test_position_size_limits
-   ```
+3. **Performance Monitoring:**
+   - Trade execution times
+   - Slippage analysis
+   - Fee tracking
 
 ## Notes
 
 - All operations target Solana mainnet
 - Uses real funds - handle with care
+- Implements comprehensive security
 - Requires proper key management
-- Supports versioned transactions
-- Implements best security practices
-- Regular security testing required
-- Test results should be logged
-- Keep test configuration updated
+- Regular monitoring recommended
 
 ## Troubleshooting
 
-1. **Keypair Loading Issues:**
-   - Check file permissions
-   - Verify file format
-   - Confirm environment variables
+1. **Trade Rejections:**
+   - Check security limits
+   - Verify wallet balance
+   - Check market status
 
-2. **Transaction Errors:**
+2. **Monitor Issues:**
    - Verify RPC connection
-   - Check account balances
-   - Monitor network status
+   - Check update interval
+   - Validate metrics
 
-3. **Security Alerts:**
-   - Review access logs
-   - Check for unauthorized access
-   - Monitor transaction history
-
-4. **Test Failures:**
-   - Check test configuration
-   - Verify security parameters
-   - Review recent changes
-   - Check log outputs
+3. **Emergency Shutdown:**
+   - Review trigger conditions
+   - Check logs for cause
+   - Follow reset procedure

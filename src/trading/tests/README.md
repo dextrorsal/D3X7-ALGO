@@ -1,238 +1,88 @@
-# Testing Structure
+# Tests Directory
 
-This directory contains the test suites for the D3X7 trading platform, organized to support both mainnet and devnet testing environments.
+This directory contains test suites for different components of the trading system.
 
 ## Directory Structure
 
 ```
-/src/trading/tests/
-├── drift/                 # Mainnet Drift Protocol tests
-│   ├── test_drift_account_manager.py
-│   ├── test_drift_adapter.py
-│   └── check_drift_collateral.py
-├── devnet/               # Devnet environment tests
-│   ├── test_drift_auth.py
-│   ├── test_drift_account_manager.py
-│   └── test_drift_setup.py
-└── README.md            # This file
+tests/
+├── run_tests.py            - Test runner script
+├── conftest.py            - Shared test fixtures
+├── wallet/               - Wallet and RPC testing
+├── unit/                  - Component-level tests
+├── integration/          - End-to-end tests
+└── utils/               - Test helpers
 ```
 
-## Test Suite Organization
+## Quick Start
 
-### Why Multiple Test Directories?
+Run all tests from project root:
+```bash
+./src/trading/run_tests.py
+```
 
-Our test structure is organized around two key principles:
-1. **Environment Separation**: Tests that run on mainnet vs devnet
-2. **Component Isolation**: Tests specific to each major component (Drift, Jupiter, etc.)
+Common test commands:
+```bash
+# Run specific test suites
+./src/trading/run_tests.py --unit
+./src/trading/run_tests.py --integration
+./src/trading/run_tests.py --devnet
+./src/trading/run_tests.py --mainnet
 
-#### 1. `/tests/drift/` Directory
-- **Purpose**: Tests for mainnet Drift Protocol integration
-- **When to Use**: 
-  - Testing production-ready features
-  - Verifying mainnet market interactions
-  - Checking real collateral and positions
-- **Key Test Files**:
-  ```
-  test_drift_account_manager.py  # Tests account operations
-  test_drift_adapter.py         # Tests market interactions
-  check_drift_collateral.py     # Verifies collateral calculations
-  ```
+# With coverage
+./src/trading/run_tests.py --coverage
 
-#### 2. `/tests/devnet/` Directory
-- **Purpose**: Safe testing environment for new features
-- **When to Use**:
-  - Developing new features
-  - Testing risky operations
-  - Verifying authentication flows
-- **Key Test Files**:
-  ```
-  test_drift_auth.py            # Tests authentication flow
-  test_drift_account_manager.py # Tests account operations
-  test_drift_setup.py          # Tests initial setup
-  ```
+# Manual testing options
+python src/trading/tests/wallet/manual_wallet_test.py  # Test wallet functionality
+```
 
 ## Test Categories
 
-### 1. Integration Tests
-- Test interaction between components
-- Verify end-to-end workflows
-- Check system boundaries
+### Wallet Tests
+- RPC connection and network switching
+- Wallet management and encryption
+- Configuration handling
+- Environment validation
 
-### 2. Component Tests
-- Focus on individual components
-- Verify specific functionality
-- Test error handling
+### Unit Tests
+- `security/`: Trading limits and risk management
+- `drift/`: Drift protocol operations
+- `jup/`: Jupiter protocol operations
 
-### 3. Safety Tests
-- Verify transaction safety
-- Check balance management
-- Test position limits
+### Integration Tests
+- `devnet/`: Development environment testing
+- `mainnet/`: Production environment validation
 
-## Running Tests
+## Common Fixtures
 
-### Mainnet Tests
-```bash
-# Run all mainnet tests
-python -m pytest src/trading/tests/drift/
+Key fixtures in `conftest.py`:
+- `wallet_manager`: Wallet operations
+- `security_limits`: Trading controls
+- `drift_adapter`: Drift protocol interface
+- `jup_adapter`: Jupiter protocol interface
 
-# Run specific mainnet test
-python -m pytest src/trading/tests/drift/test_drift_account_manager.py
+## Test Utils
 
-# Run collateral test
-python src/trading/tests/drift/check_drift_collateral.py
-```
+The `utils/` directory contains:
+- Mock data generators
+- Test helpers
+- Common test utilities
 
-### Devnet Tests
-```bash
-# Run all devnet tests
-python -m pytest src/trading/tests/devnet/
+## Manual Testing
 
-# Run specific devnet test
-python -m pytest src/trading/tests/devnet/test_drift_auth.py
-```
+Some components provide manual test scripts for direct testing without pytest dependencies:
 
-### Test Parameters
-```bash
-# Run with verbose output
-python -m pytest -v
+### Wallet Testing
+The `wallet/manual_wallet_test.py` script tests:
+- RPC Connection
+- Network Switching (devnet/testnet)
+- Wallet Operations
+  - Wallet listing
+  - Current wallet selection
+  - Encryption/Decryption
+  - Environment validation
 
-# Run with debug logging
-python -m pytest --log-cli-level=DEBUG
+Required environment variables:
+- `WALLET_PASSWORD`: For encryption/decryption tests
 
-# Run specific test function
-python -m pytest test_file.py::test_function_name
-```
-
-## Test Development Guidelines
-
-### 1. Test Organization
-- Place tests in appropriate environment directory
-- Use clear, descriptive test names
-- Group related tests in same file
-
-### 2. Test Safety
-- Never use mainnet credentials in devnet tests
-- Always clean up after tests
-- Use appropriate timeouts
-
-### 3. Test Documentation
-- Document test purpose
-- Explain test prerequisites
-- Include example usage
-
-## Writing New Tests
-
-### 1. Choose Location
-```python
-# For mainnet features:
-/tests/drift/test_new_feature.py
-
-# For experimental features:
-/tests/devnet/test_new_feature.py
-```
-
-### 2. Test Structure
-```python
-import pytest
-from src.trading.drift.account_manager import DriftAccountManager
-
-@pytest.fixture
-async def manager():
-    manager = DriftAccountManager()
-    await manager.setup()
-    yield manager
-    await manager.drift_client.unsubscribe()
-
-async def test_feature(manager):
-    # Test implementation
-    pass
-```
-
-### 3. Test Documentation
-```python
-async def test_deposit_sol():
-    """
-    Test SOL deposit functionality.
-    
-    Prerequisites:
-    - Devnet wallet with SOL
-    - Active RPC connection
-    
-    Verifies:
-    - Deposit confirmation
-    - Balance update
-    - Transaction safety
-    """
-    pass
-```
-
-## Common Test Patterns
-
-### 1. Setup/Teardown
-```python
-@pytest.fixture(autouse=True)
-async def setup_teardown():
-    # Setup
-    yield
-    # Teardown
-```
-
-### 2. Error Testing
-```python
-async def test_error_handling():
-    with pytest.raises(InsufficientFundsError):
-        await manager.deposit_sol(999999)
-```
-
-### 3. Market Testing
-```python
-@pytest.mark.parametrize("market", ["SOL-PERP", "BTC-PERP"])
-async def test_market_interaction(market):
-    # Test implementation
-```
-
-## Test Dependencies
-
-### Required Packages
-```bash
-pip install pytest pytest-asyncio pytest-timeout
-```
-
-### Environment Setup
-```bash
-# For devnet tests
-export DEVNET_RPC_URL="https://api.devnet.solana.com"
-export DEVNET_WALLET_PATH="~/.config/solana/devnet.json"
-
-# For mainnet tests
-export HELIUS_RPC_URL="your_helius_url"
-export WALLET_PATH="~/.config/solana/id.json"
-```
-
-## Troubleshooting Tests
-
-### Common Issues
-
-1. **Import Errors**
-   - Run from project root
-   - Use correct import paths
-   - Check PYTHONPATH
-
-2. **Connection Issues**
-   - Verify RPC endpoints
-   - Check network status
-   - Confirm wallet setup
-
-3. **Test Failures**
-   - Check test prerequisites
-   - Verify environment setup
-   - Review test logs
-
-## Contributing
-
-When adding new tests:
-1. Choose appropriate directory
-2. Follow naming conventions
-3. Add documentation
-4. Include example usage
-5. Update this README if needed
+For detailed documentation on writing tests, best practices, and troubleshooting, see the main [Trading Documentation](../README.md#testing).

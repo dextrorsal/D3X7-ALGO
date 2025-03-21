@@ -1,197 +1,154 @@
-# Devnet Testing Environment
+# Devnet Testing Module
 
-This directory contains components for testing and development on Solana's devnet, with a focus on Drift Protocol integration.
+This module provides tools and utilities for testing on Solana's devnet, including token creation, market simulation, and test trading functionality.
 
-## Directory Structure
+## Features
 
-```
-/src/trading/
-├── devnet/                # Devnet components
-│   ├── __init__.py       # Module exports
-│   ├── drift_auth.py     # Drift authentication
-│   ├── check_jupiter_devnet.py  # Jupiter testing
-│   └── README.md         # This file
-└── tests/
-    └── devnet/           # Devnet test suite
-        ├── test_drift_auth.py
-        ├── test_drift_account_manager.py
-        └── test_drift_setup.py
-```
+- SOL airdrop requests
+- Test token creation and minting
+- Test market creation
+- Simulated trading
+- Account management
+- Multi-wallet support
 
-## Quick Start
+## CLI Usage
 
-Run tests from the project root:
+The Devnet module is integrated into the main D3X7-ALGO CLI. Here are the available commands:
+
+### Basic Commands
 
 ```bash
-# Test authentication
-python -m pytest src/trading/tests/devnet/test_drift_auth.py
+# Request SOL Airdrop
+d3x7 devnet airdrop --wallet test_wallet [--amount 1.0]
 
-# Test account management
-python -m pytest src/trading/tests/devnet/test_drift_account_manager.py
+# Create Test Token
+d3x7 devnet create-token --name "Test Token" --symbol TEST --wallet creator_wallet [--decimals 9]
 
-# Test setup
-python -m pytest src/trading/tests/devnet/test_drift_setup.py
+# Mint Test Tokens
+d3x7 devnet mint --token TEST --amount 1000 --to-wallet recipient --authority-wallet creator_wallet
+
+# Create Test Market
+d3x7 devnet create-market --base-token TEST --quote-token USDC --wallet creator_wallet
+
+# Execute Test Trade
+d3x7 devnet test-trade --market TEST/USDC --side buy --amount 10 --wallet trading_wallet
 ```
 
-## Component Details
+### Example Usage
 
-### 1. Drift Authentication (`drift_auth.py`)
+1. Setting up a test environment:
+```bash
+# First, get some SOL
+d3x7 devnet airdrop --wallet my_wallet --amount 2.0
 
-Core authentication and client initialization for Drift Protocol on devnet.
+# Create a test token
+d3x7 devnet create-token --name "My Test Token" --symbol MTT --wallet my_wallet
 
-**Key Features:**
-- Secure wallet loading and management
-- RPC connection setup with retry logic
-- User account initialization and verification
-- Balance tracking and PnL calculation
-- Safe transaction handling
+# Mint some tokens
+d3x7 devnet mint --token MTT --amount 1000000 --to-wallet my_wallet --authority-wallet my_wallet
 
-**Usage Example:**
+# Create a market
+d3x7 devnet create-market --base-token MTT --quote-token USDC --wallet my_wallet
+```
+
+2. Testing trading operations:
+```bash
+# Execute a test buy
+d3x7 devnet test-trade --market MTT/USDC --side buy --amount 100 --wallet my_wallet
+
+# Execute a test sell
+d3x7 devnet test-trade --market MTT/USDC --side sell --amount 50 --wallet my_wallet
+```
+
+## Python API Usage
+
+You can also use the Devnet adapter directly in your Python code:
+
 ```python
-from src.trading.devnet.drift_auth import DriftHelper
+from d3x7_algo.trading.devnet import DevnetAdapter
 
 async def example():
-    helper = DriftHelper()
-    
-    # Initialize with devnet configuration
-    drift_client = await helper.initialize_drift()
+    adapter = DevnetAdapter()
+    await adapter.initialize()
     
     try:
-        # Get user account information
-        user_info = await helper.get_user_info()
-        print(f"Account Balance: {user_info['total_collateral']}")
+        # Request airdrop
+        result = await adapter.request_airdrop(wallet, 1.0)
+        print(f"Airdrop received: {result['signature']}")
+        
+        # Create test token
+        token = await adapter.create_test_token(
+            "Test Token",
+            "TEST",
+            9,
+            wallet
+        )
+        print(f"Token created: {token['mint_address']}")
+        
+        # Create test market
+        market = await adapter.create_test_market(
+            "TEST",
+            "USDC",
+            wallet
+        )
+        print(f"Market created: {market['market_address']}")
+        
     finally:
-        await drift_client.unsubscribe()
+        await adapter.cleanup()
 ```
 
-### 2. Jupiter Testing (`check_jupiter_devnet.py`)
+## Configuration
 
-Tests Jupiter integration on devnet for swap functionality.
+Configure Devnet through environment variables or the config file:
 
-**Key Features:**
-- Price quote fetching
-- Swap route optimization
-- Transaction simulation
-- Slippage protection
-
-## Environment Setup
-
-### Prerequisites
-1. **Solana CLI Tools:**
-   ```bash
-   sh -c "$(curl -sSfL https://release.solana.com/v1.17.9/install)"
-   ```
-
-2. **Devnet Account:**
-   ```bash
-   solana-keygen new --outfile ~/.config/solana/devnet.json
-   solana config set --url devnet
-   solana airdrop 2 # Get devnet SOL
-   ```
-
-### Configuration
-Required environment variables:
-```bash
-export DEVNET_RPC_URL="https://api.devnet.solana.com"
-export DEVNET_WALLET_PATH="~/.config/solana/devnet.json"
+```env
+SOLANA_NETWORK=devnet
+DEVNET_RPC_ENDPOINT=https://api.devnet.solana.com
+DEVNET_WALLET_PATH=/path/to/test/wallet.json
 ```
 
-## Testing Framework
+## Security Notes
 
-### Test Organization
-1. **Authentication Tests:**
-   - Wallet loading
-   - Client initialization
-   - Connection management
+While this is a testing environment, it's still important to:
+- Keep test wallet keys secure
+- Monitor airdrop limits
+- Clean up test tokens and markets
+- Use separate wallets for testing
 
-2. **Account Management Tests:**
-   - Deposit functionality
-   - Balance checking
-   - Position management
+## Error Handling
 
-3. **Setup Tests:**
-   - Market initialization
-   - Account creation
-   - Permission verification
+The CLI provides clear error messages for common issues:
+- Airdrop limits exceeded
+- Invalid wallet configurations
+- Network connectivity issues
+- Insufficient balance
+- Invalid market parameters
 
-### Running Tests
-```bash
-# Run all devnet tests
-python -m pytest src/trading/tests/devnet/
+## Logging
 
-# Run specific test file
-python -m pytest src/trading/tests/devnet/test_drift_auth.py -v
+Comprehensive logging is available:
 
-# Run with debug logging
-python -m pytest src/trading/tests/devnet/test_drift_auth.py -v --log-cli-level=DEBUG
+```python
+import logging
+logging.getLogger("d3x7_algo.trading.devnet").setLevel(logging.DEBUG)
 ```
 
-## Integration with Main Module
+## Dependencies
 
-### Drift Integration
-- `drift_auth.py` provides authentication for main Drift module
-- Shares account management logic with production code
-- Uses same transaction parameters for consistency
+- Python 3.10+
+- solana-py
+- anchorpy
+- rich (for CLI output)
 
-### Jupiter Integration
-- Test swaps and routing on devnet
-- Verify slippage calculations
-- Test price impact estimation
+## Contributing
 
-## Security and Best Practices
+When adding features:
+1. Follow existing code structure
+2. Add appropriate tests
+3. Update documentation
+4. Include example usage
+5. Consider cleanup procedures
 
-1. **Wallet Safety:**
-   - NEVER use mainnet wallets for testing
-   - Keep devnet private keys separate
-   - Use environment variables for sensitive data
+## Support
 
-2. **Error Handling:**
-   ```python
-   try:
-       await helper.initialize_drift()
-   except Exception as e:
-       logger.error(f"Initialization failed: {e}")
-   finally:
-       await drift_client.unsubscribe()
-   ```
-
-3. **Resource Management:**
-   - Clean up connections after tests
-   - Monitor compute unit usage
-   - Track transaction costs
-
-## Troubleshooting
-
-Common issues and solutions:
-
-1. **RPC Connection Issues:**
-   - Check devnet status: `solana ping`
-   - Verify RPC URL is correct
-   - Try alternative RPC endpoints
-
-2. **Insufficient Balance:**
-   - Request devnet airdrop: `solana airdrop 2`
-   - Check balance: `solana balance`
-   - Monitor transaction costs
-
-3. **Test Failures:**
-   - Check logs with `-v` flag
-   - Verify wallet permissions
-   - Ensure market is initialized
-
-## Development Guidelines
-
-1. **Code Organization:**
-   - Keep tests in `/tests/devnet/`
-   - Maintain separation from mainnet code
-   - Use clear naming conventions
-
-2. **Documentation:**
-   - Comment complex test scenarios
-   - Document setup requirements
-   - Keep README updated
-
-3. **Testing Strategy:**
-   - Start with unit tests
-   - Add integration tests
-   - Include error cases
+For issues and feature requests, please use the issue tracker on our repository.

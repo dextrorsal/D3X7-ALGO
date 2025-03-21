@@ -1,198 +1,364 @@
-# Trading Jupiter Directory
+# Jupiter DEX Integration
 
-This directory contains components for interacting with Jupiter Aggregator, Solana's leading DEX aggregator for optimal token swaps and trading.
+This directory contains the consolidated adapter for interacting with Jupiter, Solana's leading DEX aggregator for optimal token swaps and trading.
+
+## Features
+
+- Token swaps with optimal routing
+- Real-time price quotes
+- Route analysis and optimization
+- Balance checking
+- Market information
+- Token verification
+- Slippage protection
+- Multi-wallet support
+
+## CLI Usage
+
+The Jupiter module is integrated into the main D3X7-ALGO CLI. Here are the available commands:
+
+### Basic Commands
+
+```bash
+# Get a Quote
+d3x7 jupiter quote --from SOL --to USDC --amount 1.0 [--wallet my_wallet]
+
+# Execute a Swap
+d3x7 jupiter swap --from SOL --to USDC --amount 1.0 --wallet my_wallet [--slippage 0.5]
+
+# Check Balances
+d3x7 jupiter balance --wallet my_wallet [--token SOL]
+
+# Find Available Routes
+d3x7 jupiter routes --from SOL --to USDC --amount 1.0 [--limit 3]
+
+# Get Market Information
+d3x7 jupiter market --pair SOL/USDC
+
+# Verify Token
+d3x7 jupiter verify --token SOL
+```
+
+### Example Usage
+
+1. Getting a quote for swapping SOL to USDC:
+```bash
+d3x7 jupiter quote --from SOL --to USDC --amount 1.0
+```
+Output will show:
+- Input amount and token
+- Expected output amount
+- Price impact
+- Route type
+
+2. Executing a swap with a specific wallet:
+```bash
+d3x7 jupiter swap --from SOL --to USDC --amount 1.0 --wallet trading_wallet --slippage 0.5
+```
+The command will:
+- Show a preview of the swap
+- Display price impact and slippage settings
+- Execute the swap and show the transaction signature
+
+3. Checking token balances:
+```bash
+# Check all token balances
+d3x7 jupiter balance --wallet my_wallet
+
+# Check specific token balance
+d3x7 jupiter balance --wallet my_wallet --token SOL
+```
+
+## Python API Usage
+
+You can also use the Jupiter adapter directly in your Python code:
+
+```python
+from d3x7_algo.trading.jup import JupiterAdapter
+
+async def example():
+    adapter = JupiterAdapter()
+    await adapter.initialize()
+    
+    try:
+        # Get a quote
+        quote = await adapter.get_quote("SOL", "USDC", 1.0)
+        print(f"Expected output: {quote['outAmount']} USDC")
+        
+        # Execute a swap
+        result = await adapter.execute_swap(
+            "SOL", "USDC", 1.0,
+            slippage=0.5,
+            wallet=wallet
+        )
+        print(f"Swap executed: {result['signature']}")
+        
+    finally:
+        await adapter.cleanup()
+```
+
+## Configuration
+
+Configure Jupiter through environment variables or the config file:
+
+```env
+JUPITER_RPC_ENDPOINT=https://api.mainnet-beta.solana.com
+JUPITER_MAX_SLIPPAGE=1.0
+JUPITER_DEFAULT_WALLET=trading_wallet
+```
+
+## Security Features
+
+- Slippage protection
+- Price impact warnings
+- Route optimization
+- Transaction simulation
+- Wallet validation
+
+## Error Handling
+
+The CLI provides clear error messages for common issues:
+- Insufficient balance
+- Invalid token addresses
+- Network connectivity issues
+- Route unavailability
+- High price impact warnings
+
+## Logging
+
+Comprehensive logging is available:
+
+```python
+import logging
+logging.getLogger("d3x7_algo.trading.jup").setLevel(logging.DEBUG)
+```
+
+## Dependencies
+
+- Python 3.10+
+- solana-py
+- anchorpy
+- aiohttp
+- rich (for CLI output)
+
+## Contributing
+
+When adding features:
+1. Follow existing code structure
+2. Add appropriate tests
+3. Update documentation
+4. Include example usage
+5. Consider security implications
+
+## Support
+
+For issues and feature requests, please use the issue tracker on our repository.
 
 ## Directory Structure
 
 ```
-jup/
-├── __init__.py          - Module exports
-├── jup_adapter.py       - Jupiter API integration (16KB)
-├── live_trader.py       - Live trading implementation (20KB)
-├── jup_live_strat.py    - Live trading strategy (4.7KB)
-└── paper_report.py      - Paper trading reporting (4.3KB)
+/src/trading/
+├── jup/                   # Jupiter integration
+│   ├── __init__.py       # Module exports
+│   ├── jup_adapter.py    # Consolidated Jupiter adapter
+│   ├── examples/         # Example scripts
+│   │   └── basic_usage.py # Basic usage examples
+│   └── README.md        # This file
+```
+
+## Quick Start
+
+### Using the CLI Tools
+
+The CLI interface provides comprehensive functionality for interacting with Jupiter:
+
+```bash
+# Price Information
+python3 -m src.trading.jup.jup_adapter price SOL-USDC
+
+# Account Balances
+python3 -m src.trading.jup.jup_adapter balance
+
+# Route Analysis
+python3 -m src.trading.jup.jup_adapter quote SOL-USDC 1.0
+python3 -m src.trading.jup.jup_adapter route SOL-USDC 1.0
+
+# Execute Swaps
+python3 -m src.trading.jup.jup_adapter swap SOL-USDC 1.0 --slippage 50
+
+# Price Monitoring
+python3 -m src.trading.jup.jup_adapter monitor
+python3 -m src.trading.jup.jup_adapter monitor --markets SOL-USDC BTC-USDC ETH-USDC
+```
+
+### Using the Python API
+
+```python
+from src.trading.jup.jup_adapter import JupiterAdapter
+
+async def example():
+    adapter = JupiterAdapter()
+    await adapter.connect()
+    
+    try:
+        # Get market price
+        price = await adapter.get_market_price("SOL-USDC")
+        print(f"SOL-USDC Price: ${price:.2f}")
+        
+        # Get route metrics
+        metrics = await adapter.get_route_metrics("SOL-USDC", 1.0)
+        print(f"Price Impact: {metrics['price_impact_pct']:.2f}%")
+        
+        # Execute swap
+        result = await adapter.execute_swap(
+            market="SOL-USDC",
+            input_amount=1.0,
+            slippage_bps=50  # 0.5% slippage
+        )
+        print(f"Swap executed: {result['transaction']}")
+        
+    finally:
+        await adapter.close()
 ```
 
 ## Component Details
 
-### 1. `jup_adapter.py`
+### Jupiter Adapter (`jup_adapter.py`)
 
-Core adapter for Jupiter DEX Aggregator integration.
+Our consolidated adapter provides comprehensive functionality for Jupiter DEX operations:
 
 **Key Features:**
-- Token swap execution
-- Market price fetching
-- Route optimization
-- Account balance management
+- Market Operations
+  - Real-time price fetching
+  - Route optimization
+  - Slippage protection
+  - Fee estimation
+  
+- Trading Operations
+  - Token swaps
+  - Route analysis
+  - Transaction monitoring
+  - Trade logging
+  
+- Account Management
+  - Balance tracking
+  - Token management
+  - Transaction history
 
-**Supported Markets:**
-```python
-# Base Pairs
+## Market Support
+
+### Supported Token Pairs
 - SOL-USDC
 - BTC-USDC
 - ETH-USDC
+- USDC-SOL (reverse)
+- USDC-BTC (reverse)
+- USDC-ETH (reverse)
 
-# Reverse Pairs
-- USDC-SOL
-- USDC-BTC
-- USDC-ETH
+## Environment Setup
+
+### Dependencies
+```bash
+pip install solana-py anchorpy aiohttp tabulate
 ```
 
-**Usage Example:**
-```python
-from src.trading.jup import JupiterAdapter
+### Configuration
+The system uses environment variables for configuration:
 
-async def example():
-    adapter = JupiterAdapter(config_path="config.json")
-    await adapter.connect()
-    
-    # Get market price
-    price = await adapter.get_market_price("SOL-USDC")
-    
-    # Execute swap
-    result = await adapter.execute_swap(
-        market="SOL-USDC",
-        input_amount=1.0,
-        slippage_bps=50
-    )
-```
+1. **Required Environment Variables:**
+   ```bash
+   SOLANA_NETWORK=mainnet  # or devnet
+   WALLET_PATH=/path/to/wallet.json
+   ```
 
-### 2. `live_trader.py`
+2. **Optional Environment Variables:**
+   ```bash
+   JUP_SLIPPAGE_BPS=50     # Default slippage (0.5%)
+   JUP_LOG_LEVEL=INFO      # Logging level
+   ```
 
-Implementation of live trading functionality using Jupiter.
+## Security Best Practices
 
-**Key Features:**
-- Real-time order execution
-- Market monitoring
-- Position management
-- Risk controls
-- Performance tracking
+1. **Slippage Protection:**
+   - Always set appropriate slippage tolerance
+   - Monitor price impact
+   - Use route analysis before swaps
 
-**Usage Example:**
-```python
-from src.trading.jup import LiveTrader
+2. **Transaction Safety:**
+   ```python
+   # Get route metrics before swap
+   metrics = await adapter.get_route_metrics("SOL-USDC", 1.0)
+   if metrics["price_impact_pct"] > 1.0:
+       logger.warning("High price impact detected!")
+   ```
 
-async def example():
-    trader = LiveTrader(config_path="config.json")
-    await trader.initialize()
-    
-    # Start trading
-    await trader.start_trading()
-```
-
-### 3. `jup_live_strat.py`
-
-Live trading strategy implementation.
-
-**Key Features:**
-- Strategy definition
-- Signal generation
-- Entry/exit rules
-- Risk management
-- Performance metrics
-
-### 4. `paper_report.py`
-
-Paper trading report generation and analysis.
-
-**Key Features:**
-- Trade history tracking
-- Performance metrics calculation
-- Risk analysis
-- Report generation
-- Strategy evaluation
-
-## Integration Points
-
-### With Drift Protocol
-- Compatible with Drift's spot markets
-- Supports arbitrage opportunities
-- Price comparison functionality
-
-### With Solana Network
-- RPC connection management
-- Transaction handling
-- Account management
-
-## Best Practices
-
-1. **Error Handling:**
+3. **Error Handling:**
    ```python
    try:
        await adapter.execute_swap(market, amount)
    except Exception as e:
        logger.error(f"Swap failed: {e}")
    finally:
-       await adapter.disconnect()
+       await adapter.close()
    ```
 
-2. **Slippage Management:**
-   - Default slippage: 50 bps (0.5%)
-   - Adjust based on market conditions
-   - Monitor execution prices
+## Route Metrics Example
 
-3. **Resource Management:**
-   - Clean up connections
-   - Handle rate limits
-   - Monitor API usage
+The `route` command provides comprehensive metrics:
 
-## Configuration
+```json
+{
+  "price": 80.25,
+  "price_impact_pct": 0.15,
+  "min_output": 79.85,
+  "route_count": 3,
+  "best_route_hops": 1,
+  "fee_estimates": {
+    "platform_fee": 0.001,
+    "network_fee": 0.000005
+  }
+}
+```
 
-1. **Required Setup:**
-   - Solana RPC endpoint
-   - Wallet keypair
-   - Jupiter API endpoints
-   - Market configurations
+## Examples
 
-2. **API Endpoints:**
-   - Quote API: `https://quote-api.jup.ag/v6`
-   - Swap API: `https://quote-api.jup.ag/v6/swap`
+The `examples/` directory contains practical examples of using the Jupiter adapter:
 
-## Token Support
+### Basic Usage Example
 
-1. **Major Tokens:**
-   ```
-   - SOL:  So11111111111111111111111111111111111111112
-   - USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-   - BTC:  9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E
-   - ETH:  7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs
-   ```
+Run the basic usage example to see the adapter in action:
+```bash
+python3 -m src.trading.jup.examples.basic_usage
+```
 
-2. **Decimal Precision:**
-   - SOL: 9 decimals
-   - USDC: 6 decimals
-   - BTC: 8 decimals
-   - ETH: 8 decimals
+This example demonstrates:
+- Account overview with token balances
+- Route analysis and swap execution
+- Real-time price monitoring
+- Error handling best practices
 
-## Security Considerations
+For more examples and detailed usage patterns, check the `examples/` directory.
 
-1. **Transaction Safety:**
-   - Verify slippage limits
-   - Check output amounts
-   - Validate signatures
+## Troubleshooting
 
-2. **API Security:**
-   - Handle rate limits
-   - Secure API keys
-   - Monitor usage
+Common issues and solutions:
 
-3. **Wallet Security:**
-   - Secure keypair storage
-   - Transaction signing
-   - Balance verification
+1. **Connection Issues:**
+   - Verify RPC endpoint
+   - Check network selection
+   - Ensure wallet is accessible
 
-## Dependencies
+2. **Swap Failures:**
+   - Check token balances
+   - Verify slippage settings
+   - Monitor route availability
 
-- `solana`: Solana web3 library
-- `base58`: Address encoding
-- `requests`: API communication
-- `asyncio`: Async operations
-- `logging`: Error tracking
+3. **Price Impact:**
+   - Use route analysis
+   - Monitor market conditions
+   - Adjust trade size
 
-## Notes
-
-- Uses Jupiter v6 API
-- Supports versioned transactions
-- Implements best execution routing
-- Handles token decimal conversions
-- Provides detailed logging
+For additional support:
+1. Check the detailed logs
+2. Review the [Jupiter API Documentation](https://docs.jup.ag/)
+3. Ensure all environment variables are properly set

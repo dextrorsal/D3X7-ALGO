@@ -30,10 +30,10 @@ from anchorpy import Provider, Wallet
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solana.rpc.api import Client
-from src.utils.time_utils import (
+from src.core.time_utils import (
     convert_timestamp_to_datetime,
-    get_current_timestamp,
     get_timestamp_from_datetime,
+    get_current_timestamp
 )
 from driftpy.drift_user import DriftUser
 from driftpy.accounts.bulk_account_loader import BulkAccountLoader

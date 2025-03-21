@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-Crypto Data Fetcher - Launcher Script
-Run this script to fetch data from cryptocurrency exchanges.
+D3X7-ALGO Data Fetcher
+
+A script to fetch data from cryptocurrency exchanges.
 
 Example usage:
     # Show available exchanges and markets
-    python fetch.py list
+    python fetch.py data list
     
     # Fetch historical data for the last 7 days
-    python fetch.py historical --days 7 --markets BTC-PERP ETH-PERP SOL-PERP --resolution 1D
+    python fetch.py data fetch --mode historical --markets BTC-PERP ETH-PERP SOL-PERP --resolution 1D
     
     # Fetch historical data with specific date range
-    python fetch.py historical --start-date "2023-01-01" --end-date "2023-01-31" --markets BTC-PERP --exchanges binance
+    python fetch.py data fetch --mode historical --markets BTC-PERP --start-time "2023-01-01" --end-time "2023-01-31"
     
     # Start live data fetching
-    python fetch.py live --markets BTC-PERP ETH-PERP --resolution 15 --interval 30
+    python fetch.py data fetch --mode live --markets BTC-PERP ETH-PERP --resolution 15
 """
 
 import os
@@ -26,8 +27,8 @@ from pathlib import Path
 project_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_dir))
 
-# Import the main function from your package
-from src.utils.improved_cli import main
+# Import the main function from the new CLI package
+from src.cli import main
 
 if __name__ == "__main__":
     try:
@@ -38,8 +39,12 @@ if __name__ == "__main__":
         # Disable test mode globally
         os.environ['DISABLE_TEST_MODE'] = '1'
         
-        # Run the main async function
-        asyncio.run(main())
+        # Prepend 'data' command if not provided
+        if len(sys.argv) == 1 or sys.argv[1] not in ['data', 'wallet', 'trade']:
+            sys.argv.insert(1, 'data')
+        
+        # Run the main CLI
+        main()
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
         sys.exit(0)

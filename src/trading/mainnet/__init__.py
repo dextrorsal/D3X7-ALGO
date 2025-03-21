@@ -1,7 +1,11 @@
 """
-Solana Mainnet trading utilities and implementations
+Mainnet trading components
 """
 
-from .sol_wallet import SolanaWallet
+from src.utils.wallet.sol_wallet import SolanaWallet
+from .security_limits import SecurityLimits
 
-__all__ = ['SolanaWallet']
+__all__ = [
+    'SolanaWallet',
+    'SecurityLimits'
+]
