@@ -76,7 +76,15 @@ env/
 *.log
 *.sqlite
 logs/
-data/
+*/trade_logs/
+*/aggregated/
+*/historical/
+*/processed/
+*/raw/
+*/backups/
+*/cache/
+*/temp/
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -285,7 +293,7 @@ D3X77-ALGO/data/
 credentials.json
 config.json
 /config/
-/src/utils/wallet
+
 
 # IDE specific
 .vscode/
