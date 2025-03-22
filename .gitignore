@@ -262,7 +262,7 @@ cython_debug/
 .pypirc
 
 # Project specific data directories
-/data/
+D3X77-ALGO/data/
 /test_data/
 /monte_carlo_results/
 /optimization_results/

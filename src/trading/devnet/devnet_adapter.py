@@ -162,6 +162,44 @@ class DevnetAdapter:
             logger.error(f"Error initializing Drift client: {str(e)}")
             raise
             
+    async def wait_for_market_data(self, timeout: int = 10) -> bool:
+        """
+        Wait for market data to be loaded via WebSocket
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            bool: True if markets loaded successfully, False otherwise
+        """
+        if not self.drift_client:
+            logger.error("Drift client not initialized")
+            return False
+            
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to get the first spot market as a test
+                account_subscriber = self.drift_client.account_subscriber
+                spot_market = account_subscriber.get_spot_market_and_slot(0)
+                
+                if spot_market and spot_market.data_and_slot:
+                    logger.info("Market data loaded successfully")
+                    return True
+                    
+                logger.debug("Waiting for market data to load...")
+                await asyncio.sleep(1)
+                
+            except KeyError:
+                # Key not found yet, continue waiting
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning(f"Error checking market data: {str(e)}")
+                await asyncio.sleep(1)
+                
+        logger.warning(f"Timed out waiting for market data after {timeout} seconds")
+        return False
+            
     async def get_drift_user_info(self) -> Dict[str, Any]:
         """
         Get comprehensive Drift user account information
@@ -175,6 +213,30 @@ class DevnetAdapter:
         try:
             drift_user = self.drift_client.get_user()
             user = drift_user.get_user_account()
+            
+            # Wait for market data to be available
+            markets_loaded = await self.wait_for_market_data()
+            if not markets_loaded:
+                # Return limited info if markets aren't loaded
+                logger.warning("Market data not available, returning limited user info")
+                info = {
+                    "authority": str(user.authority),
+                    "subaccount_id": user.sub_account_id,
+                    "is_margin_trading_enabled": user.is_margin_trading_enabled,
+                    "next_order_id": user.next_order_id,
+                    "spot_collateral": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "total_collateral": 0.0
+                }
+                
+                # Display info in a nice format
+                print("\n=== Drift User Account Info (LIMITED) ===")
+                print(tabulate([
+                    ["Subaccount ID", info['subaccount_id']],
+                    ["Margin Trading", "✓" if info['is_margin_trading_enabled'] else "✗"]
+                ], tablefmt="simple"))
+                
+                return info
             
             # Get collateral info
             spot_collateral = drift_user.get_spot_market_asset_value(

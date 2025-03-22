@@ -18,7 +18,6 @@ from .storage.processed import ProcessedDataStorage
 from .utils.log_setup import setup_logging
 from .core.symbol_mapper import SymbolMapper
 from .storage.live import LiveDataStorage
-from .data.providers.supabase_provider import SupabaseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +32,10 @@ class UltimateDataFetcher:
             self.config = Config.from_ini(config_path)
         self.raw_storage = RawDataStorage(self.config.storage)
         self.processed_storage = ProcessedDataStorage(self.config.storage)
+
+        
+        # Add live data storage
         self.live_storage = LiveDataStorage(self.config.storage)
-                # Add Supabase provider if configured
-        self.supabase_provider = None
-        if hasattr(self.config, 'supabase') and self.config.supabase.get('enabled', False):
-            supabase_url = self.config.supabase.get('url')
-            supabase_key = self.config.supabase.get('api_key')
-            if supabase_url and supabase_key:
-                self.supabase_provider = SupabaseProvider(supabase_url, supabase_key)
-                logger.info("Initialized Supabase data provider")
         
         self.exchange_handlers = {}
 
@@ -199,14 +193,7 @@ class UltimateDataFetcher:
                             resolution,
                             candles
                         )
-                        # Add Supabase storage if enabled
-                        if self.supabase_provider:
-                            await self.supabase_provider.store_candles(
-                                exchange_name,
-                                market_symbol,
-                                resolution,
-                                candles
-                            )
+
                         logger.info(f"Stored {len(candles)} candles for {market_symbol} from {exchange_name}")
 
                     except Exception as e:
