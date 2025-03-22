@@ -1,1 +1,0 @@
-/home/dex/ultimate_data_fetcher/src/trading/mainnet/sol_wallet.py

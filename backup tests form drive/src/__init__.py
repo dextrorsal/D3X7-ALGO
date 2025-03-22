@@ -1,3 +1,0 @@
-"""
-Ultimate Data Fetcher package.
-"""
