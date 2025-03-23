@@ -2,7 +2,7 @@ import asyncio
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-from supabase_adapter import SupabaseAdapter
+from Supabase.Supabase-adapter import SupabaseAdapter
 
 # Constants
 SUPABASE_URL = "YOUR_SUPABASE_URL"
@@ -71,4 +71,4 @@ async def sync_csv_to_supabase():
     print("Sync completed!")
 
 if __name__ == "__main__":
-    asyncio.run(sync_csv_to_subase())
+    asyncio.run(sync_csv_to_supabase())

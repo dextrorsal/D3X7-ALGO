@@ -91,6 +91,22 @@ async def test_fetch():
             exchanges=available_exchanges
         )
         
+        # Test reading the processed data
+        print("\nTesting reading processed data...")
+        for exchange in available_exchanges:
+            for market in markets:
+                try:
+                    # Try to read the processed data
+                    data = await fetcher.processed_storage.read_candles(
+                        exchange, market, resolution, start_time, end_time
+                    )
+                    if data:
+                        print(f"  ✓ Successfully read {len(data)} candles for {market} from {exchange}")
+                    else:
+                        print(f"  ✗ No data found for {market} from {exchange}")
+                except Exception as e:
+                    print(f"  ✗ Error reading data for {market} from {exchange}: {str(e)}")
+        
         print("\nFetch completed successfully!")
         
     finally:

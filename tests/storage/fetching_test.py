@@ -11,9 +11,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Add this path to fix imports
-sys.path.append('/home/dex/D3X7-ALGO')
-sys.path.append('/home/dex/ultimate_data_fetcher')
+# Remove any existing paths and add only the current project root
+sys.path = [p for p in sys.path if 'ultimate_data_fetcher' not in p]
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 async def main():
     """Test data fetching and indicators"""
     logger.info("Starting data fetching and indicator test")
+    logger.info(f"Project root: {project_root}")
+    logger.info(f"Python path: {sys.path}")
     
     try:
         from src.core.config import Config, ExchangeConfig, ExchangeCredentials
@@ -32,11 +35,12 @@ async def main():
         
         # Try to import one indicator
         try:
-            from src.utils.indicators.wrapper_rsi import RsiIndicator
+            from src.utils.indicators.rsi import RsiIndicator
             logger.info("✅ Successfully imported RSI indicator")
             has_indicator = True
         except ImportError as e:
             logger.error(f"❌ Could not import RSI indicator: {e}")
+            logger.error(f"Looking in: {os.path.join(project_root, 'src/utils/indicators/rsi.py')}")
             has_indicator = False
         
         # Create a simple configuration for Binance
@@ -44,7 +48,7 @@ async def main():
             name="binance",
             credentials=None,  # No need for public API
             rate_limit=5,
-            markets=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+            markets=["BTCUSDT", "ETHUSDT", "SOLUSDT"],  # Using Binance's native format
             base_url="https://api.binance.com",
             enabled=True
         )
@@ -65,7 +69,7 @@ async def main():
             # Fetch candles for BTC/USDT
             logger.info(f"Fetching BTC/USDT data from {start_time} to {end_time}")
             candles = await handler.fetch_historical_candles(
-                market="BTCUSDT",
+                market="BTCUSDT",  # Using Binance's native format
                 time_range=time_range,
                 resolution="1h"  # 1-hour timeframe
             )
@@ -131,6 +135,8 @@ async def main():
                 logger.error("❌ No candles fetched")
         except Exception as e:
             logger.error(f"❌ Error fetching data: {e}")
+            import traceback
+            traceback.print_exc()
             
         # Disconnect from the exchange
         await handler.stop()

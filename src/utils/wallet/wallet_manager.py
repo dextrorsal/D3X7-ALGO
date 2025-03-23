@@ -10,7 +10,6 @@ import shutil
 from typing import Dict, Optional, List
 from pathlib import Path
 from src.utils.wallet.sol_wallet import SolanaWallet
-from src.utils.wallet.encryption import WalletEncryption
 
 logger = logging.getLogger(__name__)
 
@@ -89,64 +88,37 @@ class WalletManager:
         """
         try:
             name = name.upper()
-            trading_dir = os.path.expanduser("~/.config/solana/trading")
-            os.makedirs(trading_dir, exist_ok=True)
+            logger.info(f"Attempting to add wallet {name} from {keypair_path}")
             
-            # Load keypair - try JSON, raw byte array, and binary formats
+            if not os.path.exists(keypair_path):
+                logger.error(f"Keypair file not found: {keypair_path}")
+                return False
+                
+            # Load keypair directly from JSON file
             try:
-                # First try as binary
-                with open(keypair_path, 'rb') as f:
-                    binary_content = f.read()
-                    try:
-                        # Try to parse as JSON first
-                        keypair = json.loads(binary_content)
-                    except json.JSONDecodeError:
-                        # If not JSON, try as raw byte array
-                        try:
-                            # Try to decode as UTF-8 string
-                            content = binary_content.decode('utf-8').strip()
-                            # Parse array-like string to list of integers
-                            content = content.strip('[]')
-                            keypair = [int(x.strip()) for x in content.split(',')]
-                        except UnicodeDecodeError:
-                            # If can't decode as UTF-8, treat as raw bytes
-                            keypair = list(binary_content)
+                with open(keypair_path, 'r') as f:
+                    keypair_data = json.load(f)
+                    keypair = bytes(keypair_data)
+                    logger.info(f"Loaded keypair from {keypair_path}")
             except Exception as e:
-                # Check if running in test environment
-                is_test_env = os.environ.get("PYTEST_CURRENT_TEST") is not None
-                log_func = logger.debug if is_test_env else logger.error
-                log_func(f"Failed to read keypair file {keypair_path}: {str(e)}")
+                logger.error(f"Failed to read keypair file {keypair_path}: {str(e)}")
                 return False
                 
-            # Get encryption password
-            password = os.getenv("WALLET_PASSWORD")
-            if not password:
-                logger.error("WALLET_PASSWORD not set")
-                return False
-                
-            # Create wallet config
-            config = {
-                "name": name,
-                "keypair": keypair,
-                "keypair_path": keypair_path,
-                "is_main": is_main
-            }
+            # Create wallet object with the loaded keypair
+            self.wallets[name] = SolanaWallet(
+                name=name,
+                keypair_path=keypair_path,
+                keypair=keypair,
+                is_main=is_main
+            )
             
-            # Encrypt and save config
-            encryption = WalletEncryption(password)
-            enc_path = os.path.join(trading_dir, f"{name.lower()}.enc")
-            if encryption.save_encrypted_config(config, enc_path):
-                # Create wallet object
-                self.wallets[name] = SolanaWallet(
-                    name=name,
-                    keypair_path=keypair_path,
-                    keypair=keypair,
-                    is_main=is_main
-                )
-                if is_main:
-                    self.current_wallet = self.wallets[name]
-                return True
-            return False
+            if is_main:
+                self.current_wallet = self.wallets[name]
+                
+            pubkey = self.wallets[name].get_public_key()
+            logger.info(f"Successfully added wallet {name} with pubkey {pubkey}")
+            return True
+                
         except Exception as e:
             logger.error(f"Failed to add wallet {name}: {e}")
             return False
@@ -166,12 +138,6 @@ class WalletManager:
             if name not in self.wallets:
                 logger.error(f"Wallet {name} not found")
                 return False
-                
-            # Delete encrypted config
-            trading_dir = os.path.expanduser("~/.config/solana/trading")
-            enc_path = os.path.join(trading_dir, f"{name.lower()}.enc")
-            if os.path.exists(enc_path):
-                os.remove(enc_path)
                 
             # Remove from wallets dict
             del self.wallets[name]
@@ -211,97 +177,45 @@ class WalletManager:
         """Get list of wallet names"""
         return list(self.wallets.keys())
     
-    def encrypt_wallet(self, name: str) -> bool:
+    async def load_wallet(self, name: str) -> bool:
         """
-        Encrypt a wallet configuration
+        Load a wallet from environment variable
         
         Args:
-            name: Name of the wallet to encrypt
+            name: Name of the wallet to load (main, kp_trade, etc.)
             
         Returns:
-            bool: True if encryption was successful
+            bool: True if wallet was loaded successfully
         """
-        try:
-            name = name.upper()
-            trading_dir = os.path.expanduser("~/.config/solana/trading")
-            os.makedirs(trading_dir, exist_ok=True)
-            
-            # Get wallet path
-            if name == "MAIN":
-                wallet_path = os.path.expanduser("~/.config/solana/id.json")
-            else:
-                wallet_path = os.path.join(trading_dir, f"{name.lower()}.json")
-                
-            if not os.path.exists(wallet_path):
-                logger.error(f"Wallet file {wallet_path} not found")
-                return False
-                
-            # Get encryption password
-            password = os.getenv("WALLET_PASSWORD")
-            if not password:
-                logger.error("WALLET_PASSWORD not set")
-                return False
-                
-            # Create backup
-            backup_path = wallet_path + ".bak"
-            shutil.copy2(wallet_path, backup_path)
-            logger.info(f"Created backup at {backup_path}")
-            
-            try:
-                # Load keypair
-                with open(wallet_path) as f:
-                    keypair = json.load(f)
-                    
-                # Create config
-                config = {
-                    "name": name,
-                    "keypair": keypair,
-                    "keypair_path": wallet_path,
-                    "is_main": name == "MAIN"
-                }
-                
-                # Encrypt config
-                encryption = WalletEncryption(password)
-                enc_path = os.path.join(trading_dir, f"{name.lower()}.enc")
-                if encryption.save_encrypted_config(config, enc_path):
-                    logger.info(f"Successfully encrypted wallet {name}")
-                    
-                    # Verify encryption
-                    try:
-                        test_encryption = WalletEncryption(password)
-                        test_config = test_encryption.load_encrypted_config(enc_path)
-                        if test_config["name"] == name:
-                            logger.info("Verified encryption successful")
-                            # Delete original file
-                            os.remove(wallet_path)
-                            logger.info(f"Deleted original file {wallet_path}")
-                            return True
-                    except Exception as e:
-                        logger.error(f"Failed to verify encryption: {e}")
-                        
-                # If we get here, something went wrong
-                logger.error("Failed to verify encryption, restoring from backup")
-                shutil.copy2(backup_path, wallet_path)
-                if os.path.exists(enc_path):
-                    os.remove(enc_path)
-                return False
-                
-            except Exception as e:
-                logger.error(f"Failed to encrypt wallet: {e}")
-                # Restore from backup
-                shutil.copy2(backup_path, wallet_path)
-                logger.info("Restored from backup")
-                return False
-                
-            finally:
-                # Clean up backup
-                if os.path.exists(backup_path):
-                    os.remove(backup_path)
-                    
-        except Exception as e:
-            logger.error(f"Failed to encrypt wallet {name}: {e}")
+        name = name.upper()
+        env_var = self.WALLET_ENV_VARS.get(name)
+        if not env_var:
+            logger.error(f"Unknown wallet name: {name}")
             return False
             
+        # Try to get keypair path from environment variable
+        keypair_path = os.getenv(env_var)
+        
+        # If environment variable is not set, use default paths
+        if not keypair_path:
+            if name == "MAIN":
+                # Use default path for main wallet
+                keypair_path = os.path.join(os.path.expanduser("~"), ".config/solana/keys/id.json")
+                logger.info(f"Environment variable {env_var} not set, using default path: {keypair_path}")
+            else:
+                logger.error(f"Environment variable {env_var} not set and no default path is available")
+                return False
+        
+        # Check if the file exists
+        if not os.path.exists(keypair_path):
+            logger.error(f"Keypair file not found at {keypair_path}")
+            return False
+            
+        # Set the environment variable so other components can find it
+        os.environ[env_var] = keypair_path
+        
+        return self.add_wallet(name, keypair_path, is_main=(name == "MAIN"))
+    
     async def close(self):
         """
         Close all wallet connections

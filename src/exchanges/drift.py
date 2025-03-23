@@ -1,268 +1,278 @@
 """
-DriftHandler implementation with conditional imports for DriftPy SDK.
+Drift exchange handler implementation using the Drift Protocol SDK and custom API endpoints.
 """
-import logging
-import pandas as pd
-from typing import List, Dict, Any, Optional, Union
-from datetime import datetime, timezone, timedelta
-import aiohttp
-import json
-import sys
-import importlib.util
-import os
-from dotenv import load_dotenv
+
 import asyncio
-from collections import defaultdict
-import random
-import requests
-import csv
-from io import StringIO
-import numpy as np
+import logging
+import os
+import time
+import json
+import traceback
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timezone, timedelta
+
+import aiohttp
+import base58
+from anchorpy import Provider, Wallet
+from solders.keypair import Keypair
+from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed, Finalized, Processed
+from driftpy.drift_client import DriftClient, AccountSubscriptionConfig, DriftClientConfig
+from driftpy.drift_user import DriftUser
+from driftpy.accounts import get_perp_market_account, get_spot_market_account, get_user_account
+from driftpy.constants.config import configs
+from driftpy.types import PerpMarketAccount, SpotMarketAccount, UserAccount, TxParams
+from driftpy.math.spot_market import get_token_amount
+from driftpy.math.perp_position import calculate_perp_pnl
+from driftpy.constants.numeric_constants import QUOTE_PRECISION, BASE_PRECISION
+from driftpy.keypair import load_keypair
+from driftpy.accounts.oracle import *
+from driftpy.accounts.user import User
+from driftpy.accounts.bulk_account_loader import BulkAccountLoader
+from driftpy.constants.config import Config
+from driftpy.constants.numeric_constants import *
+from driftpy.drift_client import DriftClient
+from driftpy.drift_user import DriftUser
+from driftpy.types import MarketType, OrderType, OrderParams
+from driftpy.accounts.get_accounts import get_perp_market_account, get_spot_market_account
+from driftpy.accounts.oracle import get_markets_and_oracles
 
 from src.core.models import StandardizedCandle, TimeRange
-from src.exchanges.base import BaseExchangeHandler
-from src.core.exceptions import ExchangeError, ValidationError
-from src.core.config import ExchangeConfig, ExchangeCredentials
-from src.exchanges.auth import DriftAuth
-from driftpy.constants.config import configs
-from driftpy.drift_client import DriftClient, AccountSubscriptionConfig
-from anchorpy import Provider, Wallet
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solana.rpc.api import Client
-from src.core.time_utils import (
-    convert_timestamp_to_datetime,
-    get_timestamp_from_datetime,
-    get_current_timestamp
-)
-from driftpy.drift_user import DriftUser
-from driftpy.accounts.bulk_account_loader import BulkAccountLoader
-from driftpy.constants.numeric_constants import QUOTE_PRECISION, BASE_PRECISION
-
-# Load environment variables
-load_dotenv()
+from src.core.exceptions import ExchangeError, ValidationError, NotInitializedError
+from .base import BaseExchangeHandler, ExchangeConfig
 
 logger = logging.getLogger(__name__)
-
-# Constants
-DRIFTPY_COMPATIBLE = sys.version_info >= (3, 10)  # DriftPy requires Python 3.10+
-DISABLE_TEST_MODE = os.environ.get('DISABLE_TEST_MODE', '0').lower() in ('1', 'true', 'yes')
-
-# Try to import DriftPy and related packages
-if DRIFTPY_COMPATIBLE:
-    try:
-        # Check if driftpy is installed
-        if importlib.util.find_spec("driftpy") is not None:
-            DRIFTPY_AVAILABLE = True
-            logger.info("DriftPy SDK is available and imported successfully")
-        else:
-            if DISABLE_TEST_MODE:
-                raise ImportError("DriftPy SDK is required when test mode is disabled")
-            DRIFTPY_AVAILABLE = False
-            logger.warning("DriftPy SDK is not installed")
-    except ImportError as e:
-        if DISABLE_TEST_MODE:
-            raise
-        DRIFTPY_AVAILABLE = False
-        logger.warning(f"Failed to import DriftPy modules: {e}")
-else:
-    if DISABLE_TEST_MODE:
-        raise RuntimeError(f"Python {sys.version_info.major}.{sys.version_info.minor} is not compatible with DriftPy (requires Python 3.10+)")
-    DRIFTPY_AVAILABLE = False
-    logger.warning(f"Python {sys.version_info.major}.{sys.version_info.minor} is not compatible with DriftPy (requires Python 3.10+)")
 
 class DriftHandler(BaseExchangeHandler):
     """Handler for Drift exchange data."""
 
-    def __init__(self, config: ExchangeConfig):
-        """Initialize Drift handler with configuration."""
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize the Drift exchange handler with configuration."""
         super().__init__(config)
-        self.base_url = config.base_url or "https://drift-historical-data-v2.s3.eu-west-1.amazonaws.com/program/dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH/"
+        self.network = config.get('network', 'mainnet')
+        self.program_id = 'dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH' if self.network == 'mainnet' else 'DRiP2Pn2YbLqbpn3TKwJtPVENa1fRzxsRnTcVXX5whaT'
+        self.rpc_url = os.getenv('MAINNET_RPC_ENDPOINT') if self.network == 'mainnet' else os.getenv('DEVNET_RPC_ENDPOINT')
+        self.rate_limit = config.get('rate_limit', 10)
+        self.markets = config.get('markets', [])
+        self.base_url = config.get('base_url')
         self.client = None
-        self._drift_user = None
-        self._available_markets = []
+        self.connection = None
+        self.keypair = None
+        self.market_lookup = {}
+        self.logger = logging.getLogger(__name__)
+        
+        # Market caching
+        self._available_markets = set()
         self._market_cache = {}
         self._last_market_update = None
-        self._market_cache_ttl = timedelta(minutes=15)  # Cache markets for 15 minutes
-        self._connection = None
-        self._provider = None
+        self._market_cache_ttl = timedelta(minutes=15)
+        
+        # Rate limiting setup
+        self._last_request_time = 0
+        self._request_interval = 1.0 / self.rate_limit
+        
+        # Retry configuration
         self._retry_config = {
             'max_retries': 3,
             'base_delay': 1,
             'max_delay': 10
         }
         
-        # Initialize Drift authentication handler only if credentials provided
-        self._auth_handler = DriftAuth(config.credentials) if config.credentials else None
+        # Get keypair path from config or environment
+        self.keypair_path = (
+            config.get('private_key_path') if config.get('private_key_path')
+            else os.environ.get('MAIN_KEY_PATH')  # Use MAIN_KEY_PATH as that's what we verified has 15 SOL
+        )
+        if not self.keypair_path:
+            logger.warning("No keypair path provided. Some functionality may be limited.")
 
     async def start(self) -> None:
-        """Start the handler with improved connection management."""
-        await super().start()
+        """Start the Drift exchange handler."""
         try:
-            # Initialize connection with retry logic
+            self.logger.info("Starting Drift exchange handler...")
             await self._initialize_connection()
-            logger.info("Started Drift exchange handler")
+            await super().start()
         except Exception as e:
-            logger.error(f"Failed to start Drift handler: {e}")
+            self.logger.error(f"Failed to start Drift handler: {e}")
             raise
 
     async def _initialize_connection(self) -> None:
-        """Initialize connection with retry logic using simplified configuration."""
-        for attempt in range(self._retry_config['max_retries']):
-            try:
-                # Get RPC endpoint
-                rpc_endpoint = os.getenv("MAINNET_RPC_ENDPOINT")
-                if not rpc_endpoint:
-                    raise ExchangeError("MAINNET_RPC_ENDPOINT environment variable not set")
-                
-                # Initialize Solana connection
-                connection = AsyncClient(rpc_endpoint)
-                
-                # Load user's keypair
-                keypair_path = os.getenv("PRIVATE_KEY_PATH")
-                if not keypair_path:
-                    # Try alternative key paths
-                    keypair_path = os.getenv("MAIN_KEY_PATH") or os.getenv("KP_KEY_PATH") or os.getenv("AG_KEY_PATH")
-                    if not keypair_path:
-                        raise ExchangeError("No key path environment variable found. Please set PRIVATE_KEY_PATH, MAIN_KEY_PATH, KP_KEY_PATH, or AG_KEY_PATH")
-                
-                try:
-                    with open(keypair_path, 'r') as f:
-                        keypair_bytes = bytes(json.load(f))
-                    keypair = Keypair.from_bytes(keypair_bytes)
-                except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-                    raise ExchangeError(f"Failed to load keypair from {keypair_path}: {e}")
-                
-                # Initialize wallet and provider
-                wallet = Wallet(keypair)
-                self._provider = Provider(connection, wallet)
-                
-                # Initialize drift client with simplified configuration
-                self.client = DriftClient(
-                    self._provider.connection,
-                    self._provider.wallet,
-                    "mainnet",
-                    account_subscription=AccountSubscriptionConfig("cached")
-                )
-                
-                # Subscribe to updates
-                await self.client.subscribe()
-                
-                # Initialize DriftUser with minimal configuration
-                self._drift_user = DriftUser(
-                    self.client,
-                    self._provider.wallet.public_key
-                )
-                await self._drift_user.subscribe()
-                
-                logger.info("Successfully initialized Drift connection")
-                return
-                
-            except Exception as e:
-                delay = min(self._retry_config['base_delay'] * (2 ** attempt),
-                          self._retry_config['max_delay'])
-                logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s...")
-                await asyncio.sleep(delay)
-        
-        raise ExchangeError("Failed to initialize connection after multiple attempts")
-
-    async def get_markets(self) -> List[str]:
-        """Get list of available markets with caching and automatic refresh."""
-        current_time = datetime.now(timezone.utc)
-        
-        # Check if cache is valid
-        if (self._available_markets and self._last_market_update and 
-            current_time - self._last_market_update < self._market_cache_ttl):
-            return self._available_markets
-            
+        """Initialize connection to Drift."""
         try:
-            # Ensure connection is initialized
-            if not self.client:
-                await self._initialize_connection()
+            # Load keypair from file
+            key_bytes = None
+            with open(os.getenv('MAIN_KEY_PATH'), 'r') as f:
+                key_json = json.load(f)
+                key_bytes = bytes(key_json)
+            
+            if not key_bytes:
+                raise ExchangeError("Failed to load keypair from MAIN_KEY_PATH")
                 
-            # Fetch all perpetual markets
-            all_perp_markets = await self.client.program.account["PerpMarket"].all()
-            sorted_perp_markets = sorted(
-                all_perp_markets,
-                key=lambda x: x.account.market_index
+            self.keypair = Keypair.from_bytes(key_bytes)
+            self.logger.info(f"Loaded keypair from {os.getenv('MAIN_KEY_PATH')}")
+            
+            # Initialize Solana connection
+            self.connection = AsyncClient(self.rpc_url)
+            self.logger.info(f"Connected to Solana RPC at {self.rpc_url}")
+            
+            # Initialize Drift client with proper configuration for devnet/mainnet
+            self.client = DriftClient(
+                connection=self.connection,
+                wallet=self.keypair,
+                program_id=self.program_id,
+                opts=DriftClientConfig(
+                    env=self.network,
+                    skip_preflight=True,
+                    commitment='confirmed'
+                )
             )
             
+            # Initialize user account if needed
+            try:
+                await self.client.initialize_user()
+                self.logger.info("Initialized new Drift user account")
+            except Exception as e:
+                if "already in use" in str(e):
+                    self.logger.info("User account already exists")
+                else:
+                    raise e
+                    
+            # Add default subaccount if needed
+            try:
+                await self.client.add_sub_account(0)
+                self.logger.info("Added default subaccount (0)")
+            except Exception as e:
+                if "already exists" in str(e):
+                    self.logger.info("Default subaccount already exists")
+                else:
+                    raise e
+                    
+            # Verify we can fetch the user account
+            user = await self.client.get_user()
+            if not user:
+                raise ExchangeError("Failed to fetch user account after initialization")
+                
+            self.logger.info("Successfully initialized Drift connection")
+            self.authenticated = True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize connection: {str(e)}")
+            raise ExchangeError(f"Failed to initialize connection: {str(e)}")
+
+    async def stop(self) -> None:
+        """Stop the handler and close all connections."""
+        # Close aiohttp session
+        if self._session:
+            await self._session.close()
+            self._session = None
+        
+        # Close all Solana RPC connections
+        for connection in self._connections:
+            if hasattr(connection, 'close'):
+                try:
+                    await connection.close()
+                except Exception as e:
+                    logger.warning(f"Error closing connection: {e}")
+        
+        # Clear connection list
+        self._connections = []
+        
+        # Reset state
+        self.client = None
+        self.connection = None
+        self.keypair = None
+        self.market_lookup = {}
+        self.authenticated = False
+        
+        await super().stop()
+        logger.info("Stopped Drift exchange handler")
+
+    async def _init_market_lookup(self) -> None:
+        """Initialize market lookup tables."""
+        if not self.client:
+            raise NotInitializedError("Drift client not initialized")
+        
+        try:
+            # Get all perpetual markets
+            perp_markets = await self.client.get_perp_market_accounts()
+            
+            # Sort markets by index for consistency
+            sorted_perp_markets = sorted(perp_markets, key=lambda x: x.market_index)
+            
             # Extract market names and cache them
-            self._available_markets = [
+            self._available_markets = {
                 bytes(x.account.name).decode("utf-8").strip()
                 for x in sorted_perp_markets
-            ]
+            }
             
             # Cache market metadata for later use
             for market in sorted_perp_markets:
+                market_index = market.market_index
                 market_name = bytes(market.account.name).decode("utf-8").strip()
+                
+                # Add to lookup tables
+                self.market_name_lookup[market_index] = market_name
+                self.market_index_lookup[market_name] = market_index
+                
+                # Cache market account
                 self._market_cache[market_name] = {
-                    'index': market.account.market_index,
-                    'leverage': self._calculate_max_leverage(market.account)
+                    'account': market.account,
+                    'timestamp': time.time()
                 }
             
-            self._last_market_update = current_time
-            return self._available_markets
+            self.market_lookup_initialized = True
+            logger.info(f"Initialized {len(self._available_markets)} markets")
             
         except Exception as e:
-            logger.error(f"Error fetching markets: {e}")
-            # If cache exists, return cached markets during error
-            if self._available_markets:
-                logger.warning("Returning cached markets due to fetch error")
-                return self._available_markets
-            raise ExchangeError(f"Failed to fetch markets: {e}")
-
-    def _calculate_max_leverage(self, market_account) -> float:
-        """Calculate maximum leverage for a market."""
-        try:
-            standard_max_leverage = QUOTE_PRECISION / market_account.margin_ratio_initial
-            
-            high_leverage = (
-                QUOTE_PRECISION / market_account.high_leverage_margin_ratio_initial
-                if market_account.high_leverage_margin_ratio_initial > 0
-                else 0
-            )
-            
-            return max(standard_max_leverage, high_leverage)
-            
-        except Exception as e:
-            logger.warning(f"Error calculating max leverage: {e}")
-            return 0.0
-
-    async def stop(self) -> None:
-        """Stop the handler with proper cleanup."""
-        try:
-            if self._drift_user:
-                # Clear DriftUser cache
-                self._drift_user = None
-                
-            if self.client:
-                await self.client.unsubscribe()
-            
-            if self._connection:
-                await self._connection.close()
-                
-            if self._auth_handler:
-                await self._auth_handler.close()
-                
-            self.client = None
-            self._connection = None
-            self._provider = None
-            logger.info("Stopped Drift exchange handler")
-            
-        except Exception as e:
-            logger.error(f"Error during handler cleanup: {e}")
+            logger.error(f"Error initializing market lookup: {e}")
             raise
 
-    async def get_exchange_info(self) -> Dict[str, Any]:
-        """Get exchange information."""
-        info = {
-            "name": self.config.name,
-            "markets": await self.get_markets(),
-            "timeframes": ["1", "5", "15", "30", "60", "240", "1D"],
-            "description": "Drift Protocol - Solana's most advanced perpetual futures DEX"
+    async def get_markets(self) -> List[str]:
+        """Get list of available markets on Drift."""
+        if not self.market_lookup_initialized:
+            await self._init_market_lookup()
+        return list(self._available_markets)
+
+    async def get_market_account(self, market_name: str) -> PerpMarketAccount:
+        """
+        Get perp market account by market name.
+        
+        Args:
+            market_name: Market name (e.g. "BTC-PERP")
+            
+        Returns:
+            PerpMarketAccount: The perpetual market account
+        """
+        if not market_name.endswith("-PERP"):
+            market_name = f"{market_name}-PERP"
+        
+        # Check if market is in cache and still valid
+        if market_name in self._market_cache:
+            cached = self._market_cache[market_name]
+            if time.time() - cached['timestamp'] < 3600:  # 1 hour cache
+                return cached['account']
+        
+        # Get market index
+        if not self.market_lookup_initialized:
+            await self._init_market_lookup()
+            
+        market_index = self.market_index_lookup.get(market_name)
+        if market_index is None:
+            raise ValidationError(f"Market {market_name} not found")
+        
+        # Get market account
+        market_account = await get_perp_market_account(
+            self.client.program,
+            market_index
+        )
+        
+        # Update cache
+        self._market_cache[market_name] = {
+            'account': market_account,
+            'timestamp': time.time()
         }
-        return info
+        
+        return market_account
 
     async def fetch_historical_candles(
         self,
@@ -270,584 +280,435 @@ class DriftHandler(BaseExchangeHandler):
         time_range: TimeRange,
         resolution: str
     ) -> List[StandardizedCandle]:
-        """Fetch historical candle data with optimized batch processing."""
-        try:
-            # Map market to marketKey format
-            market_mapping = {
-                "SOL-PERP": "perp_0",
-                "BTC-PERP": "perp_1", 
-                "ETH-PERP": "perp_2"
-            }
-            market_key = market_mapping.get(market)
-            if not market_key:
-                raise ExchangeError(f"Unsupported market: {market}")
-
-            # Map resolution to Drift's format
-            resolution_mapping = {
-                "1": "1",
-                "15": "15",
-                "60": "60",
-                "240": "240",
-                "1D": "D",
-                "1W": "W"
-            }
-            candle_resolution = resolution_mapping.get(resolution)
-            if not candle_resolution:
-                raise ExchangeError(f"Unsupported resolution: {resolution}")
-
-            # Generate all required URLs for the date range
-            urls = []
-            current_date = time_range.start
-            while current_date <= time_range.end:
-                base_url = self.base_url.rstrip('/')
-                url = f"{base_url}/candle-history/{current_date.year}/{market_key}/{candle_resolution}.csv"
-                urls.append((url, current_date))
-                
-                # Move to next month
-                if current_date.month == 12:
-                    current_date = current_date.replace(year=current_date.year + 1, month=1)
-                else:
-                    current_date = current_date.replace(month=current_date.month + 1)
-
-            # Batch size for parallel processing
-            BATCH_SIZE = 3  # Adjust based on your system's capabilities
-            
-            async def fetch_batch(batch_urls):
-                async with aiohttp.ClientSession() as session:
-                    tasks = []
-                    for url, _ in batch_urls:
-                        tasks.append(self._fetch_single_url(session, url, market, resolution, time_range))
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    return [r for r in results if isinstance(r, list)]
-
-            # Process URLs in batches
-            all_candles = []
-            for i in range(0, len(urls), BATCH_SIZE):
-                batch = urls[i:i + BATCH_SIZE]
-                batch_results = await fetch_batch(batch)
-                for candles in batch_results:
-                    all_candles.extend(candles)
-
-            if not all_candles:
-                raise ExchangeError("No valid candles found in response")
-                
-            # Sort candles by timestamp
-            all_candles.sort(key=lambda x: x.timestamp)
-            return all_candles
-                    
-        except Exception as e:
-            raise ExchangeError(f"Failed to fetch historical candles: {e}")
-
-    async def _fetch_single_url(self, session, url, market, resolution, time_range):
-        """Helper method to fetch and process data from a single URL."""
-        try:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    text_data = await response.text()
-                    # Use StringIO for efficient memory usage
-                    df = pd.read_csv(StringIO(text_data))
-                    
-                    candles = []
-                    # Process in chunks for better memory management
-                    for chunk in np.array_split(df, max(1, len(df) // 1000)):
-                        for _, row in chunk.iterrows():
-                            try:
-                                timestamp = datetime.fromtimestamp(int(row["start"]) / 1000, tz=timezone.utc)
-                                if time_range.start <= timestamp <= time_range.end:
-                                    candle = StandardizedCandle(
-                                        timestamp=timestamp,
-                                        open=float(row["fillOpen"]),
-                                        high=float(row["fillHigh"]),
-                                        low=float(row["fillLow"]),
-                                        close=float(row["fillClose"]),
-                                        volume=float(row["quoteVolume"]),
-                                        source="drift",
-                                        resolution=resolution,
-                                        market=market,
-                                        raw_data=row.to_dict()
-                                    )
-                                    candles.append(candle)
-                            except (KeyError, ValueError) as e:
-                                logger.warning(f"Error parsing candle data: {e}")
-                                continue
-                    return candles
-                else:
-                    logger.warning(f"Failed to fetch data from S3: {response.status} for {url}")
-                    return []
-        except aiohttp.ClientError as e:
-            logger.warning(f"HTTP request failed for {url}: {e}")
-            return []
-
-    def _get_resolution_seconds(self, resolution: str) -> int:
-        """Convert resolution to seconds for calculating time windows."""
-        resolution_map = {
-            "1": 60,
-            "15": 900,
-            "60": 3600,
-            "240": 14400,
-            "1D": 86400,
-            "1W": 604800
-        }
-        return resolution_map.get(resolution, 60)
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.stop()
-
-    async def _get_drift_client(self) -> DriftClient:
-        """Get the DriftClient instance, initializing if necessary."""
-        if not self.client:
-            await self.start()
-        return self.client
-        
-    async def _get_authenticated_client(self) -> DriftClient:
-        """Get an authenticated Drift client for operations requiring authentication."""
-        if not self._auth_handler.is_authenticated():
-            raise ExchangeError("Authentication required for this operation")
-            
-        if not self.client:
-            await self.start()
-            
-        return self.client
-
-    def create_candles_from_trades(self, trades: List[Dict], resolution: str) -> List[StandardizedCandle]:
         """
-        Create candlestick data from historical trades based on the specified resolution.
-
-        Parameters:
-        - trades: A list of historical trade data.
-        - resolution: The resolution for the candlestick data (e.g., "1m", "15m", "1h", "1d", "1w").
-
+        Fetch historical candles from Drift using historical data API.
+        
+        Args:
+            market: Market symbol (e.g. "BTC-PERP")
+            time_range: Time range to fetch
+            resolution: Candle resolution (e.g. "1m", "1h", "1d")
+            
         Returns:
-        - A list of StandardizedCandle objects.
+            List of StandardizedCandle objects
         """
-        # Define resolution in seconds
-        resolution_map = {
-            "1m": 60,
-            "15m": 900,
-            "1h": 3600,
-            "1d": 86400,
-            "1w": 604800
-        }
+        # Ensure market is in proper format
+        if not market.endswith("-PERP"):
+            market = f"{market}-PERP"
         
-        if resolution not in resolution_map:
-            raise ValueError(f"Unsupported resolution: {resolution}")
-
-        resolution_seconds = resolution_map[resolution]
-        candles = []
-        grouped_trades = defaultdict(list)
-
-        # Group trades by the resolution
-        for trade in trades:
-            trade_time = datetime.fromtimestamp(trade['timestamp'], tz=timezone.utc)
-            # Calculate the start of the candle period
-            candle_start = trade_time - timedelta(seconds=trade_time.second % resolution_seconds,
-                                                  microseconds=trade_time.microsecond)
-            grouped_trades[candle_start].append(trade)
-
-        # Create candles from grouped trades
-        for candle_start, trades in grouped_trades.items():
-            open_price = trades[0]['price']
-            high_price = max(trade['price'] for trade in trades)
-            low_price = min(trade['price'] for trade in trades)
-            close_price = trades[-1]['price']
-            volume = sum(trade['size'] for trade in trades)
-
-            candle = StandardizedCandle(
-                timestamp=candle_start,
-                open=open_price,
-                high=high_price,
-                low=low_price,
-                close=close_price,
-                volume=volume,
-                source="drift",
-                resolution=resolution,
-                market=trades[0]['market'],
-                raw_data=trades
-            )
-            candles.append(candle)
-
-        return candles
-
-    async def get_historical_data(self, market_symbol: str, start_date: datetime, end_date: datetime) -> List[Dict]:
-        """
-        Fetch raw historical trade data for a market.
-        This method returns the raw trade data without aggregation.
-
-        Parameters:
-        - market_symbol: The market symbol (e.g., "SOL-PERP").
-        - start_date: The start date for fetching historical data.
-        - end_date: The end date for fetching historical data.
-
-        Returns:
-        - A list of raw trade data.
-        """
-        logger.info(f"Fetching historical trade data for {market_symbol} from {start_date} to {end_date}")
+        # Get market index
+        if not self.market_lookup_initialized:
+            await self._init_market_lookup()
         
-        try:
-            # Fetch historical trades using the SDK
-            historical_trades = await self._drift_user.get_historical_trades(market_symbol, start_date, end_date)
-            return historical_trades
-
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            raise ExchangeError(f"Failed to fetch historical data: {e}")
-
-    async def get_latest_candle(self, market_symbol: str) -> Optional[StandardizedCandle]:
-        """
-        Fetch the most recent candle data for a market.
-        Uses the latest trade data to create a single candlestick.
-
-        Parameters:
-        - market_symbol: The market symbol (e.g., "SOL-PERP").
-        """
-        logger.info(f"Fetching latest candle for {market_symbol}")
+        market_index = self.market_index_lookup.get(market)
+        if market_index is None:
+            raise ValidationError(f"Market {market} not found")
         
-        try:
-            # Fetch the latest trade data using the SDK
-            latest_trade = await self._drift_user.get_latest_trade(market_symbol)
-            candle = self.create_candle_from_trade(latest_trade)  # Implement this function to create a candle
-            return candle
-
-        except Exception as e:
-            logger.error(f"Error fetching latest candle: {e}")
-            raise ExchangeError(f"Failed to fetch latest candle: {e}")
-    
-    async def fetch_live_candle(self, market: str, resolution: str) -> Optional[StandardizedCandle]:
-        """
-        Fetch the most recent candle from Drift.
-        Uses SDK if available, otherwise falls back to HTTP API.
-        """
-        # Try SDK method first if available
-        if DRIFTPY_COMPATIBLE:
+        # Convert resolution to API format
+        api_resolution = self._convert_resolution(resolution)
+        
+        # Convert time range to Unix timestamps (seconds)
+        start_time = int(time_range.start.timestamp())
+        end_time = int(time_range.end.timestamp())
+        
+        # Calculate appropriate batching based on resolution and time range
+        time_chunks = self._calculate_time_chunks(start_time, end_time, api_resolution)
+        
+        all_candles = []
+        for chunk_start, chunk_end in time_chunks:
             try:
-                return await self._fetch_live_candle_sdk(market, resolution)
+                # Format API endpoint for historical data
+                endpoint = f"/historical/candles/{market_index}/{api_resolution}"
+                params = {
+                    'startTime': chunk_start,
+                    'endTime': chunk_end
+                }
+                
+                # Make API request to historical endpoint
+                response = await self._api_request("GET", endpoint, params, use_live_api=False)
+                
+                # Process candles
+                if response and 'data' in response:
+                    for candle_data in response['data']:
+                        try:
+                            # Convert timestamp to datetime
+                            timestamp = datetime.fromtimestamp(
+                                int(candle_data['time']) / 1000,  # Convert milliseconds to seconds
+                                tz=timezone.utc
+                            )
+                            
+                            # Create standardized candle
+                            candle = StandardizedCandle(
+                                timestamp=timestamp,
+                                open=float(candle_data['open']),
+                                high=float(candle_data['high']),
+                                low=float(candle_data['low']),
+                                close=float(candle_data['close']),
+                                volume=float(candle_data.get('volume', 0)),
+                                market=market,
+                                resolution=resolution,
+                                source="drift"
+                            )
+                            
+                            all_candles.append(candle)
+                        except (KeyError, ValueError) as e:
+                            logger.warning(f"Error processing candle data: {e}")
+                            continue
+                
+                # Respect rate limits
+                await asyncio.sleep(self._request_interval)
+                
             except Exception as e:
-                logger.warning(f"SDK live candle method failed, falling back to HTTP: {e}")
-                # Fall back to HTTP method
+                logger.error(f"Error fetching historical candles for {market}: {e}")
+                raise ExchangeError(f"Failed to fetch historical candles: {e}")
+                
+        # Sort candles by timestamp
+        all_candles.sort(key=lambda x: x.timestamp)
         
-        # HTTP fallback method
-        try:
-            # Get current time
-            now = datetime.now(timezone.utc)
-            
-            # Calculate start time based on resolution
-            resolution_seconds = self._get_resolution_seconds(resolution)
-            start_time = now - timedelta(seconds=resolution_seconds)
-            
-            # Create time range
-            time_range = TimeRange(start=start_time, end=now)
-            
-            # Fetch candles
-            candles = await self.fetch_historical_candles(market, time_range, resolution)
-            
-            # Return the most recent candle
-            if candles:
-                return candles[-1]
-                
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error fetching live candle: {e}")
-            raise ExchangeError(f"Failed to fetch live candle: {e}")
-    
-    async def _fetch_live_candle_sdk(self, market: str, resolution: str) -> StandardizedCandle:
-        """Fetch live candle using the DriftPy SDK."""
-        if not DRIFTPY_COMPATIBLE:
-            raise ExchangeError("DriftPy SDK is not available")
-            
-        try:
-            # Get Drift client
-            client = await self._get_drift_client()
-            
-            # Get market info
-            market_info = await self._get_market_info(market)
-            
-            if market_info["type"] == "perp":
-                # Get perp market account
-                market_account = await get_perp_market_account(
-                    client.program, 
-                    client.drift_program_id, 
-                    market_info["index"]
-                )
-                
-                # Get market price
-                price = market_account.amm.oracle_price_data.price / QUOTE_PRECISION
-                
-                # Create a candle with current price
-                candle = StandardizedCandle(
-                    timestamp=datetime.now(timezone.utc),
-                    open=price,
-                    high=price,
-                    low=price,
-                    close=price,
-                    volume=0.0,  # Volume not available in this context
-                    source="drift",
-                    resolution=resolution,
-                    market=market,
-                    raw_data={"price": price}
-                )
-                
-            else:  # spot market
-                market_account = await get_spot_market_account(
-                    client.program, 
-                    client.drift_program_id, 
-                    market_info["index"]
-                )
-                
-                # Get market price
-                price = market_account.oracle_price_data.price / QUOTE_PRECISION
-                
-                # Create a candle with current price
-                candle = StandardizedCandle(
-                    timestamp=datetime.now(timezone.utc),
-                    open=price,
-                    high=price,
-                    low=price,
-                    close=price,
-                    volume=0.0,  # Volume not available in this context
-                    source="drift",
-                    resolution=resolution,
-                    market=market,
-                    raw_data={"price": price}
-                )
-            
-            return candle
-            
-        except Exception as e:
-            logger.error(f"Error fetching live data with SDK: {e}")
-            raise ExchangeError(f"Failed to fetch live candle with SDK: {e}")
-    
-    def _parse_raw_candle(self, raw_data: Dict, market: str, resolution: str) -> StandardizedCandle:
-        """Parse raw candle data into StandardizedCandle object."""
-        try:
-            # Convert timestamp to datetime
-            if isinstance(raw_data.get('timestamp'), (int, float)):
-                timestamp = datetime.fromtimestamp(raw_data['timestamp'] / 1000, tz=timezone.utc)
-            elif 'start' in raw_data:
-                timestamp = self.standardize_timestamp(raw_data['start'])
-            elif 'ts' in raw_data:
-                timestamp = datetime.fromtimestamp(raw_data['ts'], tz=timezone.utc)
-            else:
-                timestamp = self.standardize_timestamp(raw_data['timestamp'])
-                
-            # Create StandardizedCandle
-            candle = StandardizedCandle(
-                timestamp=timestamp,
-                open=float(raw_data.get('open', 0)),
-                high=float(raw_data.get('high', 0)),
-                low=float(raw_data.get('low', 0)),
-                close=float(raw_data.get('close', 0)),
-                volume=float(raw_data.get('volume', 0)),
-                source="drift",
-                resolution=resolution,
-                market=market,
-                raw_data=raw_data
-            )
-            
-            return candle
-            
-        except Exception as e:
-            logger.error(f"Error parsing candle: {e}")
-            raise ValidationError(f"Failed to parse candle: {e}")
-    
-    def create_candle_from_trade(self, trade: Dict) -> StandardizedCandle:
-        """
-        Create a StandardizedCandle object from a single trade.
-
-        Parameters:
-        - trade: A dictionary containing trade data.
-
-        Returns:
-        - A StandardizedCandle object.
-        """
-        # Implement the logic to create a candle from a trade
-        # This will typically involve extracting the necessary fields from the trade data
-        return StandardizedCandle(
-            timestamp=datetime.fromtimestamp(trade['timestamp'], tz=timezone.utc),
-            open=trade['price'],
-            high=trade['price'],
-            low=trade['price'],
-            close=trade['price'],
-            volume=trade['size'],
-            source="drift",
-            resolution="1m",  # Default resolution, adjust as needed
-            market=trade['market'],
-            raw_data=trade
-        )
-
-    @staticmethod
-    async def self_test():
-        """Run self-test to verify handler functionality."""
-        from core.config import ExchangeConfig
-        
-        # Create test config
-        config = ExchangeConfig(
-            name="drift",
-            enabled=True,
-            base_url="https://api.drift.trade",
-            markets=["SOL-PERP", "BTC-PERP", "ETH-PERP"],
-            credentials=None
-        )
-        
-        handler = None
-        try:
-            handler = DriftHandler(config)
-            # Test market validation
-            assert await handler.validate_market("SOL-PERP")
-            
-            # Test market info
-            info = await handler.get_exchange_info()
-            assert "markets" in info
-            assert "timeframes" in info
-            assert "exchange" in info
-            
-            logger.info("Self-test passed successfully")
-            
-        except Exception as e:
-            logger.error(f"Self-test failed: {e}")
-            raise
-            
-        finally:
-            if handler:
-                await handler.stop()
-
-    async def is_ready(self) -> bool:
-        """Check if the handler is ready to use."""
-        # If not in test mode, check if client is initialized
-        if self.client:
-            return True
-            
-        # Try to initialize client if not already done
-        try:
-            await self._initialize_drift_client()
-            return self.client is not None
-        except Exception as e:
-            logger.warning(f"Failed to initialize Drift client during ready check: {e}")
-            return False
+        logger.info(f"Fetched {len(all_candles)} historical candles for {market}")
+        return all_candles
 
     async def fetch_live_candles(
         self,
         market: str,
         resolution: str
     ) -> StandardizedCandle:
-        """Fetch live candle data."""
+        """
+        Fetch current live candle using the live API endpoint.
+        
+        Args:
+            market: Market symbol (e.g. "BTC-PERP")
+            resolution: Candle resolution (e.g. "1m", "1h", "1d")
+            
+        Returns:
+            StandardizedCandle for the current period
+        """
+        # Ensure market is in proper format
+        if not market.endswith("-PERP"):
+            market = f"{market}-PERP"
+        
         try:
-            # For now, we'll return the most recent candle from historical data
-            # This is a temporary solution until we implement WebSocket support
-            now = datetime.now(timezone.utc)
-            time_range = TimeRange(
-                start=now - timedelta(minutes=int(resolution)*2),
-                end=now
-            )
-            
-            historical_candles = await self.fetch_historical_candles(
-                market=market,
-                time_range=time_range,
-                resolution=resolution
-            )
-            
-            if not historical_candles:
-                raise ExchangeError(f"No live candle data available for {market}")
+            # Get market index
+            if not self.market_lookup_initialized:
+                await self._init_market_lookup()
                 
-            # Return the most recent candle
-            return historical_candles[-1]
+            market_index = self.market_index_lookup.get(market)
+            if market_index is None:
+                raise ValidationError(f"Market {market} not found")
             
-        except Exception as e:
-            raise ExchangeError(f"Failed to fetch live candle: {e}")
-
-    async def get_market_leverage(self, market_name: str) -> float:
-        """Get current leverage for a market using cached DriftUser."""
-        try:
-            if not self._drift_user:
-                await self._initialize_connection()
-            
-            market_info = self._market_cache.get(market_name)
-            if not market_info:
-                raise ExchangeError(f"Market {market_name} not found in cache")
-                
-            # Use cached DriftUser for efficient leverage calculation
-            leverage = await self._drift_user.get_leverage(market_index=market_info['index'])
-            return leverage / 10_000  # Convert to human readable format
-            
-        except Exception as e:
-            logger.error(f"Error fetching market leverage: {e}")
-            return 0.0
-
-    async def get_market_price(self, market_name: str) -> float:
-        """Get current price for a market using public authority."""
-        try:
-            if not self.client:
-                await self._initialize_connection()
-                
-            market_info = self._market_cache.get(market_name)
-            if not market_info:
-                raise ExchangeError(f"Market {market_name} not found in cache")
-                
-            # Get market account using public authority
-            market = await get_perp_market_account(
-                self.client.program,
-                market_info['index']
-            )
-            
-            # Get oracle price
-            return market.amm.oracle_price_data.price / QUOTE_PRECISION
-            
-        except Exception as e:
-            logger.error(f"Error fetching market price: {e}")
-            raise ExchangeError(f"Failed to fetch market price: {e}")
-
-    async def get_market_info(self, market_name: str) -> Dict[str, Any]:
-        """Get comprehensive market information using public authority."""
-        try:
-            if not self.client:
-                await self._initialize_connection()
-                
-            market_info = self._market_cache.get(market_name)
-            if not market_info:
-                raise ExchangeError(f"Market {market_name} not found in cache")
-                
-            # Get market account
-            market = await get_perp_market_account(
-                self.client.program,
-                market_info['index']
-            )
-            
-            # Return comprehensive market data
-            return {
-                'name': market_name,
-                'index': market_info['index'],
-                'max_leverage': market_info['leverage'],
-                'current_price': market.amm.oracle_price_data.price / QUOTE_PRECISION,
-                'base_asset_amount_long': market.amm.base_asset_amount_long,
-                'base_asset_amount_short': market.amm.base_asset_amount_short,
-                'open_interest': market.amm.base_asset_amount_with_amm,
-                'last_update': datetime.now(timezone.utc)
+            # Format API endpoint for live data
+            endpoint = f"/v2/candles/{market_index}/latest"
+            params = {
+                'resolution': self._convert_resolution(resolution)
             }
             
+            # Make API request to live endpoint
+            response = await self._api_request("GET", endpoint, params, use_live_api=True)
+            
+            if not response or 'data' not in response:
+                raise ExchangeError(f"No live data returned for {market}")
+                
+            candle_data = response['data']
+            
+            # Convert timestamp to datetime
+            timestamp = datetime.fromtimestamp(
+                int(candle_data['time']) / 1000,  # Convert milliseconds to seconds
+                tz=timezone.utc
+            )
+            
+            # Create standardized candle
+            return StandardizedCandle(
+                timestamp=timestamp,
+                open=float(candle_data['open']),
+                high=float(candle_data['high']),
+                low=float(candle_data['low']),
+                close=float(candle_data['close']),
+                volume=float(candle_data.get('volume', 0)),
+                market=market,
+                resolution=resolution,
+                source="drift"
+            )
+            
         except Exception as e:
-            logger.error(f"Error fetching market info: {e}")
-            raise ExchangeError(f"Failed to fetch market info: {e}")
+            logger.error(f"Error fetching live candle for {market}: {e}")
+            raise ExchangeError(f"Failed to fetch live candle: {e}")
 
-# Example usage
+    def _convert_resolution(self, resolution: str) -> str:
+        """
+        Convert standard resolution format to Drift API format.
+        
+        Args:
+            resolution: Resolution in standard format (e.g. "1m", "1h", "1d")
+
+        Returns:
+            Resolution in Drift API format
+        """
+        # Standardize resolution format
+        resolution = resolution.lower()
+        
+        # Map of standard resolutions to Drift API resolutions
+        resolution_map = {
+            "1m": "1MIN",
+            "1": "1MIN",
+            "5m": "5MIN",
+            "5": "5MIN",
+            "15m": "15MIN",
+            "15": "15MIN",
+            "30m": "30MIN",
+            "30": "30MIN",
+            "1h": "1H",
+            "60": "1H",
+            "4h": "4H",
+            "240": "4H",
+            "1d": "1D",
+            "1440": "1D",
+            "1w": "1W",
+            "10080": "1W"
+        }
+        
+        # Return mapped resolution or default to 1h
+        if resolution in resolution_map:
+            return resolution_map[resolution]
+        else:
+            logger.warning(f"Unsupported resolution: {resolution}. Defaulting to 1H")
+            return "1H"
+
+    def _calculate_time_chunks(self, start_time: int, end_time: int, resolution: str) -> List[tuple]:
+        """
+        Calculate time chunks for API requests based on resolution.
+        
+        Args:
+            start_time: Start time in seconds
+            end_time: End time in seconds
+            resolution: Resolution in Drift API format
+
+        Returns:
+            List of (chunk_start, chunk_end) tuples
+        """
+        # Maximum number of candles per request
+        max_candles = 1000
+        
+        # Calculate seconds per candle based on resolution
+        seconds_per_candle = {
+            "1MIN": 60,
+            "5MIN": 300,
+            "15MIN": 900,
+            "30MIN": 1800,
+            "1H": 3600,
+            "4H": 14400,
+            "1D": 86400,
+            "1W": 604800
+        }.get(resolution, 3600)
+        
+        # Calculate max time range per request
+        max_time_range = seconds_per_candle * max_candles
+        
+        # Create time chunks
+        chunks = []
+        current_start = start_time
+        
+        while current_start < end_time:
+            current_end = min(current_start + max_time_range, end_time)
+            chunks.append((current_start, current_end))
+            current_start = current_end
+        
+        return chunks
+
+    async def _api_request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        use_live_api: bool = False
+    ) -> Any:
+        """
+        Make a request to the Drift API with rate limiting.
+        
+        Args:
+            method: HTTP method
+            endpoint: API endpoint
+            params: Query parameters
+            data: Request body
+            headers: HTTP headers
+            use_live_api: Whether to use the live API endpoint
+            
+        Returns:
+            API response as JSON
+        """
+        if not self._session:
+            self._session = aiohttp.ClientSession()
+            
+        # Apply rate limiting
+        now = time.time()
+        time_since_last_request = now - self._last_request_time
+        if time_since_last_request < self._request_interval:
+            await asyncio.sleep(self._request_interval - time_since_last_request)
+        self._last_request_time = time.time()
+        
+        # Choose appropriate base URL
+        base_url = self.live_api_url if use_live_api else self.base_url
+        url = f"{base_url}{endpoint}"
+        
+        # Default headers
+        if headers is None:
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+        # Add rate limit headers if available
+        if self.rate_limit:
+            headers['X-RateLimit-Limit'] = str(self.rate_limit)
+            
+        # Make request with retries
+        max_retries = 3
+        retry_count = 0
+        retry_delay = 1  # Initial delay in seconds
+        
+        while retry_count < max_retries:
+            try:
+                async with self._session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=data,
+                    headers=headers
+                ) as response:
+                    # Check for errors
+                    if response.status >= 400:
+                        error_text = await response.text()
+                        if response.status == 429:
+                            # Rate limit exceeded - use header or default
+                            retry_after = int(response.headers.get('Retry-After', '60'))
+                            logger.warning(f"Rate limit exceeded. Retry after {retry_after}s. Error: {error_text}")
+                            await asyncio.sleep(retry_after)
+                            retry_count += 1
+                            continue
+                        else:
+                            logger.error(f"Drift API error ({response.status}): {error_text}")
+                            raise ExchangeError(f"Drift API error ({response.status}): {error_text}")
+                            
+                    # Parse response
+                    return await response.json()
+                    
+            except aiohttp.ClientError as e:
+                retry_count += 1
+                wait_time = retry_delay * (2 ** (retry_count - 1))
+                logger.warning(f"Request failed (attempt {retry_count}/{max_retries}): {str(e)}")
+                logger.warning(f"Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+                
+                if retry_count >= max_retries:
+                    logger.error(f"Failed after {max_retries} attempts: {str(e)}")
+                    raise ExchangeError(f"Drift API request failed: {str(e)}")
+                    
+        raise ExchangeError("Maximum retries exceeded")
+
+    def validate_standard_symbol(self, market: str) -> bool:
+        """
+        Validate if a market is supported in standard format.
+        
+        Args:
+            market: Market symbol (e.g. "BTC-PERP")
+            
+        Returns:
+            True if the market is valid, False otherwise
+        """
+        # Ensure market is in proper format
+        if not market.endswith("-PERP"):
+            market = f"{market}-PERP"
+            
+        return market in self._available_markets
+
+    async def convert_standard_symbol(self, market: str) -> str:
+        """
+        Convert a standard market symbol to Drift format.
+        
+        Args:
+            market: Standard market symbol (e.g. "BTC", "BTC-USD")
+            
+        Returns:
+            Market symbol in Drift format (e.g. "BTC-PERP")
+        """
+        # If already in proper format, return as is
+        if market.endswith("-PERP"):
+            return market
+            
+        # Convert from base format (e.g. "BTC" to "BTC-PERP")
+        if "-" not in market:
+            return f"{market}-PERP"
+            
+        # Convert from spot format (e.g. "BTC-USD" to "BTC-PERP")
+        if market.endswith("-USD") or market.endswith("-USDC"):
+            base = market.split("-")[0]
+            return f"{base}-PERP"
+            
+        # If we don't recognize the format, just return with -PERP suffix
+        return f"{market}-PERP"
+
+    @staticmethod
+    async def self_test() -> bool:
+        """
+        Run a self-test to verify that the handler is working correctly.
+
+        Returns:
+            True if tests pass, False otherwise
+        """
+        try:
+            # Create handler with default config
+            config = ExchangeConfig(name="drift")
+            handler = DriftHandler(config)
+            
+            # Start the handler
+            await handler.start()
+            
+            try:
+                # Test basic market fetching
+                markets = await handler.get_markets()
+                print(f"Found {len(markets)} markets")
+                if not markets:
+                    print("Error: No markets found")
+                    return False
+
+                # Test historical data fetching
+                if "BTC-PERP" in markets:
+                    end_time = datetime.now(timezone.utc)
+                    start_time = end_time - timedelta(days=1)
+                    
+                    candles = await handler.fetch_historical_candles(
+                        "BTC-PERP",
+                        TimeRange(start=start_time, end=end_time),
+                        resolution="1h"
+                    )
+                    
+                    print(f"Fetched {len(candles)} historical candles")
+                    if not candles:
+                        print("Error: No candles found")
+                        return False
+                    
+                    # Test live candle fetching
+                    live_candle = await handler.fetch_live_candles("BTC-PERP", "1h")
+                    print(f"Fetched live candle: {live_candle}")
+                
+                print("All tests passed!")
+                return True
+                
+            finally:
+                # Ensure we clean up
+                await handler.stop()
+            
+        except Exception as e:
+            print(f"Error during self-test: {e}")
+            return False
+
 async def main():
     """Example usage of DriftHandler."""
-    import os
-    
-    # Run the self-test
-    print("Running DriftHandler self-test...")
-    success = await DriftHandler.self_test()
-    print(f"Self-test {'succeeded' if success else 'failed'}")
-    
-    # Other examples...
-    # drift_handler = DriftHandler(None)
-    # await drift_handler.connect()
-    # etc...
+    await DriftHandler.self_test()
 
 if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Run the example
     asyncio.run(main())

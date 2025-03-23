@@ -4,6 +4,7 @@ Ultimate Data Fetcher - Main orchestrator for fetching and managing crypto data.
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -13,12 +14,12 @@ from .core.config import Config
 from .core.models import TimeRange
 from .core.exceptions import DataFetcherError
 from .exchanges import get_exchange_handler
-from .storage.raw import RawDataStorage
 from .storage.processed import ProcessedDataStorage
 from .utils.log_setup import setup_logging
 from .core.symbol_mapper import SymbolMapper
 from .storage.live import LiveDataStorage
 from .data.providers.supabase_provider import SupabaseProvider
+from .utils.wallet.wallet_manager import WalletManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,9 @@ class UltimateDataFetcher:
             self.config = config
         else:
             self.config = Config.from_ini(config_path)
-        self.raw_storage = RawDataStorage(self.config.storage)
         self.processed_storage = ProcessedDataStorage(self.config.storage)
         self.live_storage = LiveDataStorage(self.config.storage)
-                # Add Supabase provider if configured
+        # Add Supabase provider if configured
         self.supabase_provider = None
         if hasattr(self.config, 'supabase') and self.config.supabase.get('enabled', False):
             supabase_url = self.config.supabase.get('url')
@@ -57,6 +57,23 @@ class UltimateDataFetcher:
     async def start(self):
         """Start the data fetcher and initialize all configured exchanges."""
         logger.info("Starting Ultimate Data Fetcher")
+        
+        # Initialize wallet manager if needed for Drift
+        wallet_manager = None
+        if 'drift' in self.config.exchanges and self.config.exchanges['drift'].enabled:
+            try:
+                # Check if MAIN_KEY_PATH is set
+                main_key_path = os.environ.get('MAIN_KEY_PATH')
+                if main_key_path and os.path.exists(main_key_path):
+                    logger.info(f"Initializing wallet manager with MAIN_KEY_PATH: {main_key_path}")
+                    wallet_manager = WalletManager()
+                    await wallet_manager.load_wallet("main")
+                    logger.info("Successfully initialized wallet manager for Drift")
+                else:
+                    logger.warning("MAIN_KEY_PATH not set or file does not exist. Drift might not authenticate properly.")
+            except Exception as e:
+                logger.error(f"Failed to initialize wallet manager: {e}")
+        
         # Initialize the symbol mapper (once)
         self.initialize_symbol_mapper()
 
@@ -64,8 +81,16 @@ class UltimateDataFetcher:
         for exchange_name, exchange_config in self.config.exchanges.items():
             if exchange_config.enabled:
                 try:
-                    handler = get_exchange_handler(exchange_config)
-                    await handler.start()
+                    if exchange_name == 'drift' and wallet_manager:
+                        # Special case for Drift - pass wallet manager
+                        from .exchanges.drift import DriftHandler
+                        handler = DriftHandler(exchange_config, wallet_manager=wallet_manager)
+                        await handler.start()
+                    else:
+                        # Regular initialization for other exchanges
+                        handler = get_exchange_handler(exchange_config)
+                        await handler.start()
+                    
                     self.exchange_handlers[exchange_name] = handler
                     logger.info(f"Initialized {exchange_name} handler")
                 except Exception as e:
@@ -186,19 +211,13 @@ class UltimateDataFetcher:
                             logger.warning(f"Empty or invalid candle data for {market_symbol} from {exchange_name}")
                             continue
 
-                        await self.raw_storage.store_candles(
-                            exchange_name,
-                            market_symbol,
-                            resolution,
-                            candles
-                        )
-
                         await self.processed_storage.store_candles(
                             exchange_name,
                             market_symbol,
                             resolution,
                             candles
                         )
+                        
                         # Add Supabase storage if enabled
                         if self.supabase_provider:
                             await self.supabase_provider.store_candles(
@@ -252,13 +271,6 @@ class UltimateDataFetcher:
                             candle = await handler.fetch_live_candles(
                                 market=exchange_market,
                                 resolution=resolution
-                            )
-
-                            await self.live_storage.store_raw_candle(
-                                exchange_name,
-                                standard_market,
-                                resolution,
-                                candle
                             )
 
                             await self.live_storage.store_processed_candle(

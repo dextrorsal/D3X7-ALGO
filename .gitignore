@@ -81,7 +81,7 @@ logs/
 */historical/
 */processed/
 */raw/
-/backups/
+backups/
 /backup/
 */cache/
 */temp/

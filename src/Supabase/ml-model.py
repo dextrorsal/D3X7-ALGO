@@ -1,5 +1,6 @@
 from pytorch_trading_model import CryptoTradingModel, prepare_indicator_features
-from supabase_adapter import SupabaseAdapter
+from Supabase.Supabase-adapter import SupabaseAdapter
+import numpy as np
 import pandas as pd
 import asyncio
 from datetime import datetime, timedelta

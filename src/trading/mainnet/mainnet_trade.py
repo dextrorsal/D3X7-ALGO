@@ -48,13 +48,10 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Get env values
-WALLET_PASSWORD = os.getenv("WALLET_PASSWORD")
-ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "true").lower() in ("true", "1", "yes")
+
 MAINNET_RPC_ENDPOINT = os.getenv("MAINNET_RPC_ENDPOINT")
 DRIFT_NETWORK = os.getenv("DRIFT_NETWORK", "mainnet-beta")
-DRIFT_PRIVATE_KEY_PATH = os.getenv("DRIFT_PRIVATE_KEY_PATH")
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
+MAIN_KEY_PATH = os.getenv("MAIN_KEY_PATH")
 KP_PATH = os.getenv("KP_PATH")
 AG_PATH = os.getenv("AG_PATH")
 
@@ -65,9 +62,6 @@ if not MAINNET_RPC_ENDPOINT:
 if DRIFT_NETWORK != "mainnet-beta":
     logger.warning(f"DRIFT_NETWORK set to {DRIFT_NETWORK}, should be 'mainnet-beta' for mainnet trading")
 
-if not WALLET_PASSWORD and ENABLE_ENCRYPTION:
-    logger.error("WALLET_PASSWORD not set but encryption is enabled")
-    raise ValueError("WALLET_PASSWORD must be set when ENABLE_ENCRYPTION is true")
 
 async def setup_wallet_cli():
     """Initialize wallet CLI with environment variables"""

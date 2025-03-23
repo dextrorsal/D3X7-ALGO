@@ -27,7 +27,6 @@ from solana.transaction import Transaction
 # Local imports
 from src.utils.wallet.wallet_manager import WalletManager
 from src.utils.wallet.sol_rpc import get_solana_client, set_network, get_network, NETWORK_URLS
-from src.utils.wallet.encryption import WalletEncryption
 from src.utils.wallet.sol_wallet import SolanaWallet
 from src.utils.wallet.price_service import get_price_service, PriceService
 from src.utils.wallet.wallet_migration import WalletMigration
@@ -47,7 +46,6 @@ class WalletCommands:
         self.price_service = get_price_service()
         
         # Configuration
-        self.ENCRYPTION_ENABLED = True
         self.setup_logging()
         
         # Token configuration from wallet_cli.py

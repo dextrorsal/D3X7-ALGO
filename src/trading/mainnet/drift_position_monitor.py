@@ -37,7 +37,6 @@ from driftpy.accounts import get_perp_market_account, get_spot_market_account
 
 # Import wallet management system
 from src.utils.wallet.wallet_manager import WalletManager
-from src.utils.wallet.encryption import WalletEncryption
 from src.trading.drift.account_manager import DriftAccountManager
 from src.trading.drift.management.drift_wallet_manager import DriftWalletManager
 from rich.console import Console

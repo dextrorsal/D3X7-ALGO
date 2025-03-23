@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Script to fetch data from all exchanges with the correct symbols for each.
+Script to fetch data from Drift exchange with SOL-PERP market.
 """
 
 import asyncio
 import sys
+import os
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 # Add the project directory to the Python path
-project_dir = Path(__file__).resolve().parent
+project_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_dir))
 
 from src.core.config import Config
@@ -18,11 +19,14 @@ from src.ultimate_fetcher import UltimateDataFetcher
 from src.utils.log_setup import setup_logging
 import logging
 
-async def fetch_all_exchanges():
-    """Fetch data from all exchanges with the correct symbols for each."""
+async def fetch_drift_data():
+    """Fetch SOL-PERP data from Drift exchange."""
     # Setup logging
     setup_logging()
     logging.getLogger().setLevel(logging.INFO)
+    
+    # Print environment variables for debugging
+    print(f"MAIN_KEY_PATH: {os.environ.get('MAIN_KEY_PATH', 'Not set')}")
     
     # Initialize fetcher with config
     config = Config(".env")
@@ -32,86 +36,35 @@ async def fetch_all_exchanges():
     await fetcher.start()
     
     try:
-        # Define time range (last 7 days)
+        # Define time range (last 365 days)
         end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=7)
+        start_time = end_time - timedelta(days=365)
         time_range = TimeRange(start=start_time, end=end_time)
         
-        # Define resolution
-        resolution = "15"
+        # Define resolution (30 minutes)
+        resolution = "30"
         
-        # Define exchange-specific markets
-        exchange_markets = {
-            "binance": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-            "coinbase": ["BTC-USD", "ETH-USD", "SOL-USD"],
-            "drift": ["SOL", "BTC", "ETH", "SOL-PERP", "BTC-PERP", "ETH-PERP"]
-        }
+        # Define market (just SOL-PERP)
+        markets = ["SOL-PERP"]
         
-        # Fetch data for each exchange with its specific markets
-        for exchange_name, markets in exchange_markets.items():
-            if exchange_name in fetcher.exchange_handlers:
-                print(f"\nFetching data for {exchange_name.upper()} with markets: {markets}")
-                
-                # Check if the exchange handler is working
-                handler = fetcher.exchange_handlers.get(exchange_name)
-                if not handler:
-                    print(f"  ✗ Exchange {exchange_name} not initialized, skipping")
-                    continue
-                
-                # Try to fetch data for each market
-                for market in markets:
-                    try:
-                        print(f"  Fetching {market} from {exchange_name}...")
-                        
-                        # Validate the market
-                        is_valid = False
-                        try:
-                            if hasattr(handler, 'validate_standard_symbol'):
-                                result = handler.validate_standard_symbol(market)
-                                if asyncio.iscoroutine(result):
-                                    is_valid = await result
-                                else:
-                                    is_valid = result
-                            else:
-                                is_valid = handler.validate_market(market)
-                        except Exception as e:
-                            print(f"  ✗ Error validating {market}: {str(e)}")
-                            continue
-                        
-                        if not is_valid:
-                            print(f"  ✗ Market {market} not supported by {exchange_name}, skipping")
-                            continue
-                        
-                        # Fetch historical data
-                        candles = await handler.fetch_historical_candles(market, time_range, resolution)
-                        
-                        if not candles:
-                            print(f"  ✗ No data returned for {market}")
-                            continue
-                        
-                        # Store the data
-                        await fetcher.raw_storage.store_candles(
-                            exchange_name,
-                            market,
-                            resolution,
-                            candles
-                        )
-                        
-                        await fetcher.processed_storage.store_candles(
-                            exchange_name,
-                            market,
-                            resolution,
-                            candles
-                        )
-                        
-                        print(f"  ✓ Stored {len(candles)} candles for {market}")
-                        
-                    except Exception as e:
-                        print(f"  ✗ Error fetching {market}: {str(e)}")
-            else:
-                print(f"\n✗ Exchange {exchange_name} not available")
+        # Define exchanges (just drift)
+        exchanges = ["drift"]
         
-        print("\nFetch completed!")
+        print(f"\nFetching SOL-PERP data from Drift for the last 365 days with 30-minute resolution")
+        
+        # Check if the drift handler is available
+        if "drift" in fetcher.exchange_handlers:
+            # Fetch historical data
+            await fetcher.fetch_historical_data(
+                markets=markets,
+                time_range=time_range,
+                resolution=resolution,
+                exchanges=exchanges
+            )
+            
+            print("\nFetch completed!")
+        else:
+            print("\n✗ Drift exchange not available")
         
     finally:
         # Stop the fetcher
@@ -123,4 +76,4 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
     # Run the fetch async function
-    asyncio.run(fetch_all_exchanges()) 
+    asyncio.run(fetch_drift_data()) 

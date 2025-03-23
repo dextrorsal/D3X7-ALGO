@@ -39,12 +39,12 @@ BASE_CONFIG_DIR = os.path.expanduser("~/.config/solana")
 TRADING_CONFIG_DIR = os.path.join(BASE_CONFIG_DIR, "trading")
 DRIFT_CONFIG_DIR = os.path.join(BASE_CONFIG_DIR, "drift")
 
-# Wallet path configuration - using .env values with fallbacks
+# Wallet path configuration - using .env values with fallbacks to JSON files
 WALLET_PATHS = {
-    "main": os.getenv("PRIVATE_KEY_PATH") or os.path.join(TRADING_CONFIG_DIR, "main.enc"),
-    "kp_trade": os.getenv("KP_PATH") or os.path.join(TRADING_CONFIG_DIR, "kp_trade.enc"),
-    "ag_trade": os.getenv("AG_PATH") or os.path.join(TRADING_CONFIG_DIR, "ag_trade.enc"),
-    "drift": os.getenv("DRIFT_PRIVATE_KEY_PATH") or os.path.join(DRIFT_CONFIG_DIR, "drift.enc")
+    "main": os.getenv("MAIN_KEY_PATH", os.path.join(BASE_CONFIG_DIR, "keys/id.json")),
+    "kp_trade": os.getenv("KP_KEY_PATH", os.path.join(TRADING_CONFIG_DIR, "kp_trade.json")),
+    "ag_trade": os.getenv("AG_KEY_PATH", os.path.join(TRADING_CONFIG_DIR, "ag_trade.json")),
+    "drift": os.getenv("DRIFT_PRIVATE_KEY_PATH", os.path.join(DRIFT_CONFIG_DIR, "drift.json"))
 }
 
 # Configuration file path
