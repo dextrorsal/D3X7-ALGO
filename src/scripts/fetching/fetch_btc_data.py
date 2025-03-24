@@ -18,9 +18,7 @@ async def fetch_btc_data():
     # Create storage config
     storage_config = StorageConfig(
         data_path=Path("data"),
-        historical_raw_path=Path("data/historical/raw"),
         historical_processed_path=Path("data/historical/processed"),
-        live_raw_path=Path("data/live/raw"),
         live_processed_path=Path("data/live/processed"),
         use_compression=False
     )

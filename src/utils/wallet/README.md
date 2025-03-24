@@ -1,266 +1,129 @@
-# Solana Wallet CLI
+# 🔑 Wallet Utilities
 
-A modern, user-friendly CLI tool for managing multiple Solana wallets with beautiful terminal output, comprehensive token support, real-time monitoring, and secure encryption.
+Core wallet management utilities and components for the D3X7-ALGO platform. This folder contains the foundational wallet management system that powers the D3X7-ALGO CLI wallet commands.
 
-## 🚀 Quick Start
+## 📁 Directory Structure
 
-```bash
-# 1. Check your current wallet balances
-python -m utils.wallet.wallet_cli balance
-
-# 2. Switch to devnet for testing
-python -m utils.wallet.wallet_cli network devnet
-
-# 3. Request an airdrop (devnet only)
-python -m utils.wallet.wallet_cli airdrop 2 --wallet MAIN
-
-# 4. Launch the GUI Watch Mode
-python -m utils.wallet.wallet_cli watch
+```
+src/utils/wallet/
+├── encryption.py          # Wallet encryption utilities
+├── phantom_utils.py       # Phantom wallet compatibility tools
+├── price_service.py       # Token price fetching service
+├── sol_rpc.py            # Solana RPC connection management
+├── sol_wallet.py         # Base Solana wallet implementation
+├── wallet_commands.py     # Legacy wallet command implementation
+├── wallet_manager.py      # Multi-wallet management system
+├── wallet_migration.py    # Wallet configuration migration tools
+└── watch_mode_gui.py      # Real-time wallet monitoring GUI
 ```
 
-## 🌟 Features
+## 🔧 Core Components
 
-- Beautiful, color-coded terminal output for better readability
-- Multi-wallet management with support for trading strategies
-- Network switching between mainnet, devnet, and testnet
-- Balance checking for SOL and SPL tokens with formatted numbers
-- Secure keypair handling with encryption and permissions validation
-- Easy-to-use transfer functionality between wallets
-- Real-time GUI monitoring with multi-wallet support
-- Multi-currency display (SOL, USD, CAD) with live price updates
-- Modern dark-themed GUI with transaction history
+### WalletManager (`wallet_manager.py`)
+- Core wallet management system
+- Handles wallet creation, loading, and deletion
+- Manages wallet configurations and persistence
+- Used by the D3X7-ALGO CLI for wallet operations
 
-## 💻 GUI Watch Mode
+### SolanaWallet (`sol_wallet.py`)
+- Base Solana wallet implementation
+- Handles keypair management
+- Provides transaction signing capabilities
+- Supports SOL and SPL token operations
 
-The new GUI watch mode provides real-time monitoring of your wallets:
+### Encryption (`encryption.py`)
+- Secure wallet data encryption
+- Password-based encryption for wallet configs
+- Key derivation and secure storage
+- Used to protect sensitive wallet data
 
-- **Multi-Wallet Dashboard**: Monitor multiple wallets simultaneously
-- **Live Balance Updates**: See your balances in SOL, USD, and CAD
-- **Transaction History**: View recent transactions with status indicators
-- **Modern Dark Theme**: Professional-grade UI with sleek design
-- **Interactive Features**:
-  - Wallet selector dropdown
-  - Closeable wallet tabs
-  - Real-time refresh button
-  - Color-coded transaction status
+### RPC Management (`sol_rpc.py`)
+- Manages Solana RPC connections
+- Handles network switching (mainnet/devnet/testnet)
+- Connection pooling and retry logic
+- RPC endpoint configuration
 
-```bash
-# Launch GUI Watch Mode
-python -m utils.wallet.wallet_cli watch          # Monitor all wallets
-python -m utils.wallet.wallet_cli watch MAIN     # Monitor specific wallet
+## 🛠 Supporting Utilities
+
+### Price Service (`price_service.py`)
+- Real-time token price fetching
+- Supports multiple currencies (USD/CAD)
+- Price caching and update intervals
+- Used for balance display and monitoring
+
+### Phantom Utils (`phantom_utils.py`)
+- Phantom wallet compatibility layer
+- Keypair format conversion
+- Seed phrase generation
+- Private key extraction
+
+### Watch Mode GUI (`watch_mode_gui.py`)
+- Real-time wallet monitoring interface
+- Balance updates and price tracking
+- Transaction history display
+- Network status indicators
+
+### Wallet Migration (`wallet_migration.py`)
+- Configuration migration tools
+- Backup and restore functionality
+- Version compatibility handling
+- Safe upgrade paths
+
+## 🔒 Security Features
+
+- Encrypted wallet storage
+- Secure memory handling
+- Password-based encryption
+- Secure RPC connections
+- Protected config files
+
+## 🔄 Integration
+
+These utilities are used by the D3X7-ALGO CLI (`d3x7 wallet` commands) and other platform components. For CLI usage, please refer to the main D3X7-ALGO documentation.
+
+### Example Integration
+```python
+from src.utils.wallet.wallet_manager import WalletManager
+from src.utils.wallet.encryption import WalletEncryption
+
+# Initialize wallet manager
+wallet_manager = WalletManager()
+
+# Create encrypted wallet
+encryption = WalletEncryption()
+wallet = wallet_manager.create_wallet("MAIN", keypair_path, encryption)
 ```
 
-## 💡 Common Use Cases
+## 📚 Development Notes
 
-1. **Managing Multiple Trading Wallets**
-   ```bash
-   # Set up trading wallets
-   python -m utils.wallet.wallet_cli add KP_TRADE ~/.config/solana/trading/kp_trade.json
-   python -m utils.wallet.wallet_cli add AG_TRADE ~/.config/solana/trading/ag_trade.json
-   
-   # Check all wallet balances at once
-   python -m utils.wallet.wallet_cli balance
-   
-   # Transfer SOL between wallets
-   python -m utils.wallet.wallet_cli transfer 1 AG_TRADE --from-wallet MAIN
-   
-   # Monitor wallets in real-time with GUI
-   python -m utils.wallet.wallet_cli watch
-   ```
+### Adding New Features
+1. Implement in appropriate utility module
+2. Update WalletManager if needed
+3. Add to CLI through src/cli/wallet/
+4. Update tests and documentation
 
-2. **Network Management**
-   ```bash
-   # Start with devnet for testing
-   python -m utils.wallet.wallet_cli network devnet
-   
-   # Get some test SOL
-   python -m utils.wallet.wallet_cli airdrop 2 --wallet KP_TRADE
-   
-   # Check balances
-   python -m utils.wallet.wallet_cli balance
-   
-   # Switch to mainnet when ready
-   python -m utils.wallet.wallet_cli network mainnet
-   ```
+### Security Guidelines
+- Always use encryption for sensitive data
+- Implement secure memory handling
+- Follow Solana security best practices
+- Use secure RPC connections
 
-3. **Wallet Operations**
-   ```bash
-   # List all configured wallets
-   python -m utils.wallet.wallet_cli list
-   
-   # Check specific wallet balance
-   python -m utils.wallet.wallet_cli balance
-   
-   # Transfer between wallets
-   python -m utils.wallet.wallet_cli transfer 0.1 KP_TRADE --from-wallet MAIN
-   ```
+## 🔗 Dependencies
 
-## 📚 Core Components
+- `solana-py`: Solana Python SDK
+- `pycryptodome`: Encryption utilities
+- `base58`: Address encoding
+- `rich`: Console formatting
+- `click`: Command line interface (legacy)
 
-### 1. Wallet CLI (`wallet_cli.py`)
-Your main interface for all wallet operations:
+## 🤝 Contributing
 
-```bash
-# Basic Operations
-python -m utils.wallet.wallet_cli balance                               # Check all wallet balances
-python -m utils.wallet.wallet_cli add KP_TRADE ~/.config/solana/trading/kp_trade.json
-python -m utils.wallet.wallet_cli transfer 1 AG_TRADE --from-wallet KP_TRADE
-python -m utils.wallet.wallet_cli airdrop 1 --wallet MAIN              # Devnet only
+When contributing to these utilities:
+1. Follow security best practices
+2. Add tests for new features
+3. Update documentation
+4. Maintain backward compatibility
 
-# Network Operations
-python -m utils.wallet.wallet_cli network devnet                       # Switch to devnet
-python -m utils.wallet.wallet_cli network mainnet                      # Switch to mainnet
+## ⚠️ Legacy Notice
 
-# GUI Operations
-python -m utils.wallet.wallet_cli watch                               # Launch GUI monitor
-```
-
-### 2. Balance Display
-The balance command shows a beautiful, formatted output with multi-currency support:
-```
-═══════════════════════════════════════════════════════════════════════
-💫 SOLANA DEVNET WALLET BALANCES
-═══════════════════════════════════════════════════════════════════════
-
-🔑 Wallet: MAIN
-📍 Address: wgfSHT...VAuoc6
-💰 Balances:
-   ◎ 15.4541 Solana
-   $ 1,236.33 USD
-   $ 1,669.04 CAD
-
-🔑 Wallet: KP_TRADE
-📍 Address: 5mN4XG...dRp3r5
-💰 Balances:
-   ◎ 6.0000 Solana
-   $ 480.00 USD
-   $ 648.00 CAD
-```
-
-## 📁 Configuration
-
-### 1. Environment Setup
-Create a `.env` file:
-```env
-# Your wallet paths
-PRIVATE_KEY_PATH=~/.config/solana/id.json
-
-# RPC endpoints (optional - defaults to public endpoints)
-MAINNET_RPC_URL=https://api.mainnet-beta.solana.com
-DEVNET_RPC_URL=https://api.devnet.solana.com
-TESTNET_RPC_URL=https://api.testnet.solana.com
-
-# Optional: Custom encryption key for wallet files
-WALLET_ENCRYPTION_KEY=your-secure-encryption-key
-```
-
-### 2. Wallet Directory Structure
-```
-~/.config/solana/
-├── id.json                  # Main wallet (encrypted)
-└── trading/                 # Trading wallets
-    ├── kp_trade.json       # (encrypted)
-    └── ag_trade.json       # (encrypted)
-```
-
-## 🔒 Security Best Practices
-
-1. **Keypair Protection**
-   ```bash
-   # Set correct permissions for all wallet files
-   chmod 600 ~/.config/solana/id.json
-   chmod 600 ~/.config/solana/trading/*.json
-   
-   # Ensure wallet files are encrypted
-   python -m utils.wallet.wallet_cli verify-encryption
-   ```
-
-2. **Safe Testing Process**
-   ```bash
-   # 1. Always start on devnet
-   python -m utils.wallet.wallet_cli network devnet
-   
-   # 2. Test your operations
-   python -m utils.wallet.wallet_cli airdrop 1 --wallet MAIN
-   python -m utils.wallet.wallet_cli transfer 0.1 KP_TRADE --from-wallet MAIN
-   
-   # 3. Verify balances in GUI
-   python -m utils.wallet.wallet_cli watch
-   
-   # 4. Switch to mainnet only when ready
-   python -m utils.wallet.wallet_cli network mainnet
-   ```
-
-## 🐛 Troubleshooting
-
-Common issues and solutions:
-
-1. **GUI Not Launching**
-   ```bash
-   # Install required dependencies
-   pip install PyQt6
-   
-   # Verify Python path
-   export PYTHONPATH=/path/to/your/project
-   ```
-
-2. **Balance Not Showing**
-   ```bash
-   # Verify network connection
-   python -m utils.wallet.wallet_cli network devnet
-   
-   # Check wallet permissions and encryption
-   python -m utils.wallet.wallet_cli verify-encryption
-   ```
-
-3. **Transfer Failed**
-   ```bash
-   # Check source wallet has enough balance
-   python -m utils.wallet.wallet_cli balance
-   
-   # Verify you're on the right network
-   python -m utils.wallet.wallet_cli network devnet  # for testing
-   ```
-
-4. **Airdrop Failed**
-   ```bash
-   # Ensure you're on devnet
-   python -m utils.wallet.wallet_cli network devnet
-   
-   # Try smaller amounts (1-2 SOL)
-   python -m utils.wallet.wallet_cli airdrop 1 --wallet MAIN
-   ```
-
-## 📋 Testing
-
-```bash
-# 1. Switch to devnet
-python -m utils.wallet.wallet_cli network devnet
-
-# 2. Get test SOL
-python -m utils.wallet.wallet_cli airdrop 1 --wallet MAIN
-
-# 3. Test transfers
-python -m utils.wallet.wallet_cli transfer 0.1 KP_TRADE --from-wallet MAIN
-
-# 4. Monitor in GUI
-python -m utils.wallet.wallet_cli watch
-
-# 5. Verify balances
-python -m utils.wallet.wallet_cli balance
-```
-
-## 🎨 GUI Customization
-
-The watch mode GUI can be customized through environment variables:
-
-```env
-# GUI Theme Colors
-GUI_PRIMARY_COLOR=#03E1FF    # Solana blue
-GUI_BACKGROUND=#2b2b2b       # Dark background
-GUI_TEXT_COLOR=#FFFFFF       # White text
-
-# Update Intervals (milliseconds)
-GUI_BALANCE_UPDATE=5000      # Balance update interval
-GUI_PRICE_UPDATE=60000       # Price update interval
-```
+The `wallet_commands.py` file contains the legacy CLI implementation. For new development, use the D3X7-ALGO CLI in `src/cli/wallet/`.

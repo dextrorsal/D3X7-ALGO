@@ -10,19 +10,36 @@ from .exceptions import ValidationError
 
 @dataclass
 class StandardizedCandle:
-    """Standardized format for OHLCV candle data."""
-    timestamp: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    source: str
-    resolution: str
-    market: str
-    raw_data: Dict[str, Any]
+    """Standardized candle format for all exchanges."""
 
-    def __post_init__(self):
+    def __init__(
+        self,
+        timestamp: datetime,
+        open: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+        market: str,
+        resolution: str,
+        source: str,
+        trade_count: Optional[int] = None,
+        additional_info: Optional[Dict[str, Any]] = None,
+        raw_data: Optional[Any] = None  # Make raw_data optional
+    ):
+        """Initialize a standardized candle."""
+        self.timestamp = timestamp
+        self.open = open
+        self.high = high
+        self.low = low
+        self.close = close
+        self.volume = volume
+        self.market = market
+        self.resolution = resolution
+        self.source = source
+        self.trade_count = trade_count
+        self.additional_info = additional_info or {}
+        self.raw_data = raw_data  # Optional raw data
         self.validate()
 
     def validate(self):
@@ -33,6 +50,8 @@ class StandardizedCandle:
             raise ValidationError("OHLCV values must be numeric.")
         if self.volume < 0:
             raise ValidationError("Volume cannot be negative.")
+        if self.trade_count is not None and not isinstance(self.trade_count, int):
+            raise ValidationError("Trade count must be an integer.")
 
     @classmethod
     def create_empty(cls, market: str, source: str, resolution: str) -> 'StandardizedCandle':
@@ -48,7 +67,9 @@ class StandardizedCandle:
             source=source,
             resolution=resolution,
             market=market,
-            raw_data={}
+            raw_data=None,
+            trade_count=0,
+            additional_info={}
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -64,6 +85,8 @@ class StandardizedCandle:
             'resolution': self.resolution,
             'market': self.market,
             'raw_data': self.raw_data,
+            'trade_count': self.trade_count,
+            'additional_info': self.additional_info
         }
 
     @classmethod

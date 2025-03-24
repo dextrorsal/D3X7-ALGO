@@ -1,525 +1,278 @@
 """
-Drift DEX adapter for live trading
-Implements the specific functionality needed to interact with Drift protocol
+Simple Drift DEX adapter focused on core functionality
 """
 
-import logging
 import asyncio
-import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
-import json
-import base64
+import logging
 import os
-from pathlib import Path
-from src.utils.wallet.sol_rpc import get_solana_client, get_network, NETWORK_URLS
-from src.utils.wallet.wallet_manager import WalletManager
-from solders.keypair import Keypair
+import json
+from typing import Dict, Optional, Any
+from dotenv import load_dotenv
 
+from solana.rpc.async_api import AsyncClient
+from solders.keypair import Keypair
+from driftpy.drift_client import DriftClient
+from driftpy.drift_user import DriftUser
+from driftpy.types import TxParams, OrderParams, OrderType, MarketType, PositionDirection
+from driftpy.constants.numeric_constants import BASE_PRECISION, QUOTE_PRECISION
+from driftpy.account_subscription_config import AccountSubscriptionConfig
+from driftpy.constants.config import configs
+from anchorpy import Provider, Wallet
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DriftAdapter:
     """
-    Adapter for Drift DEX protocol
-    Handles the specific logic for interacting with Drift smart contracts
+    Simplified Drift DEX adapter focusing on core functionality
     """
     
-    def __init__(self, config_path: str = None):
-        """
-        Initialize Drift adapter
+    def __init__(self, network="devnet", keypair_path=None, rpc_url=None):
+        """Initialize the DriftAdapter.
         
         Args:
-            config_path: Path to configuration file
+            network (str): The network to connect to ("devnet" or "mainnet")
+            keypair_path (str): Path to the keypair file
+            rpc_url (str): Optional RPC URL to override environment variables
         """
-        self.config_path = config_path
+        load_dotenv()
+        self.network = network
+        self.keypair_path = keypair_path
+        
+        # Set RPC endpoint based on network or override
+        if rpc_url:
+            self.rpc_endpoint = rpc_url
+        elif network == "devnet":
+            self.rpc_endpoint = os.getenv("DEVNET_RPC_ENDPOINT", "https://api.devnet.solana.com")
+        else:
+            self.rpc_endpoint = os.getenv("MAINNET_RPC_ENDPOINT", "https://api.mainnet-beta.solana.com")
+        
+        logger.info(f"DriftAdapter initialized for {network} using {self.rpc_endpoint}")
+        
+        self.connection = None
         self.client = None
+        self.user = None
         self.connected = False
-        self.wallet = None
-        self.wallet_manager = WalletManager()
         
-        # Market configuration
-        self.markets = {
-            "SOL-PERP": {
-                "market_index": 0,
-                "base_decimals": 9,
-                "quote_decimals": 6
-            },
-            "BTC-PERP": {
-                "market_index": 1,
-                "base_decimals": 8,
-                "quote_decimals": 6
-            },
-            "ETH-PERP": {
-                "market_index": 2,
-                "base_decimals": 8,
-                "quote_decimals": 6
-            }
-        }
-        
-        # Load spot markets too
-        self.spot_markets = {
-            "SOL-USDC": {
-                "market_index": 0,
-                "base_decimals": 9,
-                "quote_decimals": 6
-            },
-            "BTC-USDC": {
-                "market_index": 1,
-                "base_decimals": 8,
-                "quote_decimals": 6
-            },
-            "ETH-USDC": {
-                "market_index": 2,
-                "base_decimals": 8,
-                "quote_decimals": 6
-            }
-        }
+        # Default transaction parameters
+        self.tx_params = TxParams(
+            compute_units=700_000,
+            compute_units_price=10_000
+        )
     
     async def connect(self) -> bool:
-        """
-        Connect to Drift protocol
-        
-        Returns:
-            True if successful, False otherwise
-        """
+        """Connect to the Solana RPC endpoint and initialize Drift client"""
         try:
-            # Get network configuration
-            network = get_network()
-            logger.info(f"Using network: {network}")
+            logger.info(f"Connecting to {self.network} RPC at {self.rpc_endpoint}")
+            self.connection = AsyncClient(self.rpc_endpoint)
             
-            # Initialize Solana client
-            self.client = await get_solana_client()
-            version_info = await self.client.get_version()
-            logger.info(f"Connected to Solana node version: {version_info}")
+            # Create a temporary wallet for testing
+            wallet = Wallet(Keypair())
+            logger.info(f"Created temporary wallet with public key: {wallet.public_key}")
             
-            # Load wallet using WalletManager
-            wallet = self.wallet_manager.get_current_wallet()
-            if not wallet:
-                raise Exception("No wallet loaded. Please set up a wallet first.")
+            # Initialize Drift client with direct parameters
+            logger.info(f"Initializing DriftClient with network: {self.network}")
+            self.client = DriftClient(
+                connection=self.connection,
+                wallet=wallet,
+                env=self.network
+            )
             
-            # Get keypair from wallet
-            if hasattr(wallet, 'keypair') and wallet.keypair:
-                if isinstance(wallet.keypair, bytes):
-                    self.wallet = Keypair.from_bytes(wallet.keypair)
-                else:
-                    self.wallet = wallet.keypair
-            else:
-                raise Exception("No keypair available in wallet")
+            # Subscribe to updates
+            logger.info("Subscribing to Drift client updates...")
+            await self.client.subscribe()
+            logger.info("Successfully subscribed to Drift client")
             
-            logger.info(f"Loaded wallet: {self.wallet.pubkey()}")
-            
-            # Connect to Drift client
-            # In a real implementation, this would initialize the Drift client
-            # self.client = DriftClient(
-            #     keypair=self.wallet,
-            #     env=network  # Use configured network
-            # )
-            
-            # Mock client for demonstration
-            self.client = {"connected": True}
-            
-            # Simulate connection delay
-            await asyncio.sleep(1)
+            # Check if we can get markets
+            try:
+                logger.info("Attempting to fetch perp markets...")
+                perp_markets = self.client.get_perp_market_accounts()
+                if asyncio.iscoroutine(perp_markets):
+                    perp_markets = await perp_markets
+                logger.info(f"Found {len(perp_markets) if perp_markets else 0} perp markets")
+                
+                logger.info("Attempting to fetch spot markets...")
+                spot_markets = self.client.get_spot_market_accounts()
+                if asyncio.iscoroutine(spot_markets):
+                    spot_markets = await spot_markets
+                logger.info(f"Found {len(spot_markets) if spot_markets else 0} spot markets")
+            except Exception as market_error:
+                logger.error(f"Error fetching markets: {market_error}")
             
             self.connected = True
-            logger.info(f"Connected to Drift protocol successfully on {network}")
+            logger.info(f"Connected to {self.network} RPC")
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to connect to Drift: {e}")
-            self.connected = False
+            logger.error(f"Failed to connect to {self.network}: {e}")
             return False
     
-    async def get_market_price(self, market: str) -> float:
-        """
-        Get current market price from Drift
+    async def initialize(self, keypair_path=None):
+        """Initialize the connection to Drift.
         
         Args:
-            market: Market symbol (e.g., "SOL-PERP" or "SOL-USDC")
-            
-        Returns:
-            Current market price
+            keypair_path (str): Path to keypair file (overrides the one set in constructor)
         """
-        if not self.connected:
-            await self.connect()
-            
         try:
-            # Check if it's a perp or spot market
-            market_config = None
-            if market in self.markets:
-                market_config = self.markets[market]
-                market_type = "perp"
-            elif market in self.spot_markets:
-                market_config = self.spot_markets[market]
-                market_type = "spot"
-            else:
-                raise ValueError(f"Unknown market: {market}")
+            # Use provided keypair path or the one from constructor
+            keypair_file = keypair_path or self.keypair_path or os.getenv("DEVNET_KEYPAIR_PATH")
+            if not keypair_file:
+                raise ValueError("No keypair file specified. Please provide a keypair_path or set DEVNET_KEYPAIR_PATH env variable.")
                 
-            market_index = market_config["market_index"]
+            # Connect to Solana if not already connected
+            if not self.connected:
+                logger.info(f"Connecting to Solana network: {self.network}")
+                self.connection = AsyncClient(self.rpc_endpoint)
             
-            # In a real implementation, this would call the Drift client
-            # if market_type == "perp":
-            #     price_data = await self.client.get_perp_market_price(market_index)
-            # else:
-            #     price_data = await self.client.get_spot_market_price(market_index)
-            # return price_data.price
+            # Load keypair from file
+            logger.info(f"Loading keypair from: {keypair_file}")
+            with open(keypair_file, 'r') as f:
+                keypair_data = json.load(f)
+                # Convert JSON array to bytes
+                keypair_bytes = bytes(keypair_data)
+                wallet_keypair = Keypair.from_bytes(keypair_bytes)
+            logger.info(f"Loaded wallet with public key: {wallet_keypair.pubkey()}")
             
-            # Mock implementation for demonstration
-            # Simulate some realistic prices
-            base_prices = {
-                "SOL-PERP": 80.25,
-                "BTC-PERP": 42500.75,
-                "ETH-PERP": 2275.50,
-                "SOL-USDC": 80.30,
-                "BTC-USDC": 42525.25,
-                "ETH-USDC": 2270.75
-            }
+            # Initialize Drift client
+            logger.info("Initializing Drift client")
+            self.client = DriftClient(
+                connection=self.connection,
+                wallet=wallet_keypair,
+                account_subscription=AccountSubscriptionConfig("websocket"),
+                env=self.network,
+                tx_params=self.tx_params
+            )
             
-            # Add small random variation to simulate price movement
-            import random
-            base_price = base_prices.get(market, 100.0)
-            variation = random.uniform(-0.5, 0.5) / 100  # -0.5% to +0.5%
-            return base_price * (1 + variation)
-            
-        except Exception as e:
-            logger.error(f"Error getting price for {market}: {e}")
-            raise
-    
-    async def get_account_balances(self) -> Dict[str, float]:
-        """
-        Get account balances from Drift
-        
-        Returns:
-            Dictionary of token balances
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            # In a real implementation, this would call the Drift client
-            # user_account = await self.client.get_user_account()
-            # balances = {}
-            # for token in user_account.tokens:
-            #     balances[token.symbol] = token.balance
-            # return balances
-            
-            # Mock implementation for demonstration
-            return {
-                "USDC": 1000.0,
-                "SOL": 10.0,
-                "BTC": 0.02,
-                "ETH": 0.5
-            }
+            # Subscribe to updates
+            logger.info("Subscribing to Drift client updates...")
+            await self.client.subscribe()
+            logger.info("Successfully subscribed to Drift client updates")
+
+            # Get user account
+            logger.info("Getting user account...")
+            self.user = self.client.get_user()
+            logger.info("Successfully initialized Drift adapter")
             
         except Exception as e:
-            logger.error(f"Error getting account balances: {e}")
-            raise
-    
-    async def get_positions(self) -> List[Dict]:
-        """
-        Get current open positions
-        
-        Returns:
-            List of position details
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            # In a real implementation, this would call the Drift client
-            # positions = await self.client.get_user_positions()
-            # return [p.to_dict() for p in positions]
-            
-            # Mock implementation for demonstration
-            return []  # Empty list for no positions
-            
-        except Exception as e:
-            logger.error(f"Error getting positions: {e}")
-            raise
-    
-    async def place_spot_order(self, 
-                             market: str, 
-                             side: str, 
-                             size: float, 
-                             price: Optional[float] = None,
-                             order_type: str = "market") -> Dict:
-        """
-        Place a spot order on Drift
-        
-        Args:
-            market: Market symbol (e.g., "SOL-USDC")
-            side: Order side ("buy" or "sell")
-            size: Order size in base currency
-            price: Limit price (optional, for limit orders)
-            order_type: Order type ("market" or "limit")
-            
-        Returns:
-            Order details
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            if market not in self.spot_markets:
-                raise ValueError(f"Unknown spot market: {market}")
-                
-            market_config = self.spot_markets[market]
-            market_index = market_config["market_index"]
-            
-            # Get current price if not provided
-            if price is None or order_type == "market":
-                price = await self.get_market_price(market)
-            
-            # In a real implementation, this would call the Drift client
-            # order_params = {
-            #     "market_index": market_index,
-            #     "direction": 0 if side == "buy" else 1,  # 0 for long, 1 for short
-            #     "base_asset_amount": size,
-            #     "price": price,
-            #     "order_type": 0 if order_type == "market" else 1,  # 0 for market, 1 for limit
-            #     "reduce_only": False
-            # }
-            # order = await self.client.place_spot_order(order_params)
-            # return order.to_dict()
-            
-            # Mock implementation for demonstration
-            order_id = f"{side}_{market}_{int(time.time())}"
-            
-            # Calculate quote amount
-            quote_amount = size * price
-            
-            # Wait to simulate order execution
-            await asyncio.sleep(0.5)
-            
-            # Return order details
-            return {
-                "order_id": order_id,
-                "market": market,
-                "side": side,
-                "size": size,
-                "price": price,
-                "quote_amount": quote_amount,
-                "type": order_type,
-                "status": "filled",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error placing {side} order for {market}: {e}")
-            raise
-    
-    async def place_perp_order(self, 
-                             market: str, 
-                             side: str, 
-                             size: float, 
-                             price: Optional[float] = None,
-                             order_type: str = "market",
-                             reduce_only: bool = False) -> Dict:
-        """
-        Place a perpetual futures order on Drift
-        
-        Args:
-            market: Market symbol (e.g., "SOL-PERP")
-            side: Order side ("buy" or "sell")
-            size: Order size in base currency
-            price: Limit price (optional, for limit orders)
-            order_type: Order type ("market" or "limit")
-            reduce_only: Whether the order should only reduce position
-            
-        Returns:
-            Order details
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            if market not in self.markets:
-                raise ValueError(f"Unknown perpetual market: {market}")
-                
-            market_config = self.markets[market]
-            market_index = market_config["market_index"]
-            
-            # Get current price if not provided
-            if price is None or order_type == "market":
-                price = await self.get_market_price(market)
-            
-            # In a real implementation, this would call the Drift client
-            # order_params = {
-            #     "market_index": market_index,
-            #     "direction": 0 if side == "buy" else 1,  # 0 for long, 1 for short
-            #     "base_asset_amount": size,
-            #     "price": price,
-            #     "order_type": 0 if order_type == "market" else 1,  # 0 for market, 1 for limit
-            #     "reduce_only": reduce_only
-            # }
-            # order = await self.client.place_perp_order(order_params)
-            # return order.to_dict()
-            
-            # Mock implementation for demonstration
-            order_id = f"{side}_{market}_{int(time.time())}"
-            
-            # Calculate notional value
-            notional_value = size * price
-            
-            # Wait to simulate order execution
-            await asyncio.sleep(0.5)
-            
-            # Return order details
-            return {
-                "order_id": order_id,
-                "market": market,
-                "side": side,
-                "size": size,
-                "price": price,
-                "notional_value": notional_value,
-                "type": order_type,
-                "reduce_only": reduce_only,
-                "status": "filled",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error placing {side} order for {market}: {e}")
-            raise
-    
-    async def cancel_order(self, order_id: str) -> bool:
-        """
-        Cancel an existing order
-        
-        Args:
-            order_id: Order ID to cancel
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            # In a real implementation, this would call the Drift client
-            # await self.client.cancel_order(order_id)
-            
-            # Mock implementation for demonstration
-            await asyncio.sleep(0.2)  # Simulate network delay
-            
-            logger.info(f"Cancelled order {order_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error cancelling order {order_id}: {e}")
-            return False
-    
-    async def get_order_status(self, order_id: str) -> Dict:
-        """
-        Get status of an order
-        
-        Args:
-            order_id: Order ID to check
-            
-        Returns:
-            Order status details
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            # In a real implementation, this would call the Drift client
-            # order = await self.client.get_order(order_id)
-            # return order.to_dict()
-            
-            # Mock implementation for demonstration
-            # Parse order ID to extract details (our mock format: {side}_{market}_{timestamp})
-            parts = order_id.split('_')
-            if len(parts) >= 3:
-                side = parts[0]
-                market = parts[1]
-                timestamp = int(parts[2])
-                
-                # Most orders are filled in our mock
-                return {
-                    "order_id": order_id,
-                    "market": market,
-                    "side": side,
-                    "status": "filled",
-                    "timestamp": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(),
-                    "filled_size": 1.0  # Mock value
-                }
-            else:
-                return {"order_id": order_id, "status": "unknown"}
-            
-        except Exception as e:
-            logger.error(f"Error getting status for order {order_id}: {e}")
-            raise
-    
-    async def close_position(self, market: str) -> Dict:
-        """
-        Close an open position
-        
-        Args:
-            market: Market to close position for
-            
-        Returns:
-            Order details from closing the position
-        """
-        if not self.connected:
-            await self.connect()
-            
-        try:
-            # Get current positions
-            positions = await self.get_positions()
-            
-            # Find the position for this market
-            position = None
-            for p in positions:
-                if p.get("market") == market:
-                    position = p
-                    break
-                    
-            if not position:
-                logger.warning(f"No open position found for {market}")
-                return {"status": "no_position", "market": market}
-                
-            # Determine side for closing
-            side = "sell" if position.get("side") == "buy" else "buy"
-            size = abs(position.get("size", 0))
-            
-            # Place order to close position
-            if "PERP" in market:
-                return await self.place_perp_order(
-                    market=market,
-                    side=side,
-                    size=size,
-                    reduce_only=True
-                )
-            else:
-                return await self.place_spot_order(
-                    market=market,
-                    side=side,
-                    size=size
-                )
-                
-        except Exception as e:
-            logger.error(f"Error closing position for {market}: {e}")
-            raise
-    
-    async def disconnect(self):
-        """
-        Disconnect from Drift protocol
-        """
-        if self.connected:
-            # In a real implementation, this would close the client connection
-            # await self.client.close()
-            
-            # Mock implementation
-            logger.info("Disconnecting from Drift protocol")
-            self.connected = False
+            logger.error(f"Error initializing Drift adapter: {str(e)}")
+            if self.client:
+                try:
+                    await self.client.unsubscribe()
+                except Exception as cleanup_error:
+                    logger.error(f"Error during cleanup: {cleanup_error}")
+            if self.connection:
+                try:
+                    await self.connection.close()
+                except Exception as cleanup_error:
+                    logger.error(f"Error closing connection: {cleanup_error}")
+            self.connection = None
             self.client = None
+            self.user = None
+            raise Exception(f"Error initializing Drift adapter: {str(e)}")
     
-    def __del__(self):
+    async def place_order(self,
+                        market: str,
+                        side: str,
+                        size: float,
+                        price: Optional[float] = None) -> Dict[str, Any]:
         """
-        Clean up resources when the adapter is garbage collected
+        Place a simple market/limit order
+        
+        Args:
+            market: Market symbol (e.g. "SOL-PERP")
+            side: "buy" or "sell"
+            size: Order size
+            price: Optional limit price (None for market orders)
+            
+        Returns:
+            Order details
         """
-        # Ensure client is disconnected
-        if hasattr(self, 'connected') and self.connected:
-            # We can't use await in __del__, so we just log a warning
-            logger.warning("DriftAdapter was not properly disconnected")
+        if not self.client or not self.user:
+            logger.error("Drift client not initialized")
+            return None
+        
+        try:
+            # Simple market mapping
+            market_index = 0  # SOL-PERP
+            if market == "BTC-PERP":
+                market_index = 1
+            elif market == "ETH-PERP":
+                market_index = 2
+            
+            # Create order parameters
+            order_params = OrderParams(
+                market_index=market_index,
+                market_type=MarketType.PERP,
+                direction=PositionDirection.LONG if side.lower() == "buy" else PositionDirection.SHORT,
+                base_asset_amount=int(size * BASE_PRECISION),
+                price=int(price * QUOTE_PRECISION) if price else None,
+                order_type=OrderType.LIMIT if price else OrderType.MARKET
+            )
+            
+            # Place order
+            tx_sig = await self.client.place_order(order_params)
+            
+            return {
+                "transaction": str(tx_sig),
+                "market": market,
+                "side": side,
+                "size": size,
+                "price": price,
+                "type": "limit" if price else "market"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error placing order: {str(e)}")
+            raise
+    
+    async def get_position(self, market: str) -> Dict[str, Any]:
+        """
+        Get current position for a market
+        
+        Args:
+            market: Market symbol (e.g. "SOL-PERP")
+            
+        Returns:
+            Position details
+        """
+        if not self.client or not self.user:
+            logger.error("Drift client not initialized")
+            return None
+        
+        try:
+            # Simple market mapping
+            market_index = 0  # SOL-PERP
+            if market == "BTC-PERP":
+                market_index = 1
+            elif market == "ETH-PERP":
+                market_index = 2
+            
+            position = self.user.get_perp_position(market_index)
+            if not position:
+                return {"size": 0, "entry_price": 0, "unrealized_pnl": 0}
+            
+            return {
+                "size": position.base_asset_amount / BASE_PRECISION,
+                "entry_price": position.entry_price / QUOTE_PRECISION if position.entry_price else 0,
+                "unrealized_pnl": position.unrealized_pnl / QUOTE_PRECISION if position.unrealized_pnl else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting position: {str(e)}")
+            raise
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        if self.client:
+            try:
+                await self.client.unsubscribe()
+                logger.info("Unsubscribed from Drift client")
+            except Exception as e:
+                logger.error(f"Error during cleanup: {str(e)}")
+        
+        if self.connection:
+            try:
+                await self.connection.close()
+                logger.info("Closed Solana connection")
+            except Exception as e:
+                logger.error(f"Error closing connection: {str(e)}")

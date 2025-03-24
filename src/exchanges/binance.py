@@ -1,68 +1,32 @@
 """
-Binance exchange handler implementation using the official binance-connector SDK.
+Simplified Binance exchange handler for fetching historical and live candle data.
 """
 
 import logging
-from typing import List, Dict, Optional, Tuple, Union, Any, Callable
-from datetime import datetime, timezone, timedelta
-import asyncio
+import time
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timezone
+import os
+
 from binance.spot import Spot
 from binance.error import ClientError
-import random
-import json
-import time
-import sys
-
-import aiohttp
-import pandas as pd
-from binance.client import Client
 
 from src.core.models import StandardizedCandle, TimeRange
-from src.exchanges.base import BaseExchangeHandler
-from src.core.exceptions import ExchangeError, ValidationError, RateLimitError
-from src.core.symbol_mapper import SymbolMapper
-from src.utils.time_utils import (
-    convert_timestamp_to_datetime,
-    get_current_timestamp,
-    get_timestamp_from_datetime,
-)
+from src.core.exceptions import ExchangeError, ValidationError
+from .base import BaseExchangeHandler, ExchangeConfig
 
 logger = logging.getLogger(__name__)
 
-# Binance error codes that should trigger a retry
-RETRY_ERROR_CODES = {
-    -1003,  # Too many requests; current limit is exceeded
-    -1006,  # An unexpected response was received from the message bus
-    -1007,  # Timeout waiting for response from backend server
-    -1015,  # Too many new orders
-    -1021,  # Timestamp for this request was 1000ms ahead of the server's time
-    -1022   # Signature for this request is not valid
-}
-
 class BinanceHandler(BaseExchangeHandler):
-    """Handler for Binance exchange data using official SDK."""
+    """Simplified handler for Binance exchange data."""
 
-    def __init__(self, config):
+    def __init__(self, config: ExchangeConfig):
         """Initialize Binance handler with configuration."""
         super().__init__(config)
         self.client = None
-        self.symbol_mapper = SymbolMapper()
-        # Define both formats for test mode
-        self._mock_markets = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-        self._is_test_mode = False
-        self._available_markets = []
-        self._request_interval = 1.0 / self.rate_limit if self.rate_limit > 0 else 0
-        self._last_request_time = 0
-        self._weight_used = 0
-        self._weight_limit = 1200  # Default weight limit for Binance API
-        self._weight_reset_time = None
+        self.base_url = config.base_url or "https://api.binance.com"
         
-        # Initialize market filters cache
-        self._market_filters = {}
-        
-        # Initialize symbol mapper with common pairs
-        self._initialize_symbol_mapper()
-        
+        # Initialize timeframe mapping
         self.timeframe_map = {
             "1": "1m",
             "3": "3m",
@@ -80,389 +44,22 @@ class BinanceHandler(BaseExchangeHandler):
             "1W": "1w",
             "1M": "1M"
         }
-        # Base URLs for different purposes
-        self._base_urls = [
-            "https://api.binance.com",
-            "https://api1.binance.com",
-            "https://api2.binance.com",
-            "https://api3.binance.com",
-            "https://api4.binance.com"
-        ]
-        self._data_base_url = "https://data-api.binance.vision"  # For market data only
-        self._current_url_index = 0
-        self._exchange_info = None  # Cache exchange info
 
     async def start(self):
         """Start the Binance handler and initialize the client."""
         try:
-            if not self.client:
-                await self._initialize_client()
-                
-            # Try to get exchange info
-            try:
-                exchange_info = await self.get_exchange_info()
-                self._exchange_info = exchange_info
-                
-                # Process and cache market filters
-                for symbol in exchange_info['symbols']:
-                    if symbol['status'] == 'TRADING':
-                        permissions = symbol.get('permissions', [])
-                        if isinstance(permissions, str):
-                            permissions = [permissions]
-                        
-                        self._market_filters[symbol['symbol']] = {
-                            'filters': symbol['filters'],
-                            'baseAsset': symbol['baseAsset'],
-                            'quoteAsset': symbol['quoteAsset'],
-                            'permissions': permissions,
-                            'symbol': symbol['symbol']
-                        }
-                        
-                        standard_symbol = f"{symbol['baseAsset']}-{symbol['quoteAsset']}"
-                        self._market_filters[standard_symbol] = self._market_filters[symbol['symbol']]
-                
-                # Register all trading markets with symbol mapper
-                symbols = []
-                binance_symbols = []
-                for symbol in exchange_info['symbols']:
-                    if symbol['status'] == 'TRADING':
-                        standard_symbol = f"{symbol['baseAsset']}-{symbol['quoteAsset']}"
-                        symbols.append(standard_symbol)
-                        binance_symbols.append(symbol['symbol'])
-                        
-                        # Register symbol with the mapper
-                        self.symbol_mapper.register_symbol(
-                            exchange="binance",
-                            symbol=symbol['symbol'],
-                            base_asset=symbol['baseAsset'],
-                            quote_asset=symbol['quoteAsset'],
-                            is_perpetual=False
-                        )
-                        
-                        # Also register standard format
-                        self.symbol_mapper.register_symbol(
-                            exchange="binance",
-                            symbol=standard_symbol,
-                            base_asset=symbol['baseAsset'],
-                            quote_asset=symbol['quoteAsset'],
-                            is_perpetual=False
-                        )
-                
-                logger.info(f"Initialized {len(symbols)} trading markets for Binance")
-                
-            except Exception as e:
-                logger.warning(f"Failed to get exchange info: {e}. Falling back to test mode.")
-                self._is_test_mode = True
-                self._setup_test_mode()
-                
+            # Initialize the client - no API keys needed for public data
+            self.client = Spot(base_url=self.base_url)
+            logger.info("Started Binance exchange handler")
         except Exception as e:
-            logger.warning(f"Failed to initialize Binance client: {e}. Falling back to test mode.")
-            self._is_test_mode = True
-            self._setup_test_mode()
-            
-        logger.info("Started Binance exchange handler")
+            logger.error(f"Failed to initialize Binance client: {e}")
+            raise ExchangeError(f"Failed to initialize Binance client: {e}")
 
-    def _setup_test_mode(self):
-        """Set up test mode with mock data."""
-        # Set up mock markets with the expected structure
-        self._is_test_mode = True
-        
-        # Create the mock_markets attribute with the expected structure
-        self.mock_markets = {
-            'spot': {
-                'standard_format': ['BTC-USDT', 'ETH-USDT', 'SOL-USDT'],
-                'exchange_format': self._mock_markets
-            },
-            'perp': {
-                'standard_format': ['BTC-PERP', 'ETH-PERP', 'SOL-PERP'],
-                'exchange_format': ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-            }
-        }
-        
-        logger.info(f"Initialized test mode with {len(self._mock_markets)} mock markets")
-        return self.mock_markets
-
-    async def _initialize_client(self, retry_count: int = 0) -> None:
-        """Initialize the Binance client with retry logic."""
-        if retry_count >= 5:  # Max 5 retries
-            raise ExchangeError("Failed to initialize Binance client after 5 attempts")
-            
-        try:
-            # Initialize the client with the current base URL
-            # For public endpoints, API keys are optional
-            self.client = Spot(
-                api_key=self.config.credentials.api_key if self.config.credentials else None,
-                api_secret=self.config.credentials.api_secret if self.config.credentials else None,
-                base_url=self.base_url
-            )
-            
-            # Test connection with a simple ping - this doesn't require authentication
-            # Use direct HTTP request instead of client.ping() to avoid NoneType errors
-            if self._session is None:
-                await self.start()
-                
-            url = f"{self.base_url}/api/v3/ping"
-            async with self._session.get(url) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise ExchangeError(f"Failed to ping Binance API: {response.status} - {error_text}")
-                logger.info("Successfully connected to Binance API")
-            
-        except Exception as e:
-            # If we fail to connect, try the next URL
-            if retry_count < len(self._base_urls) - 1:
-                next_url = self._base_urls[retry_count + 1]
-                logger.warning(f"Failed to connect to {self.base_url}, trying {next_url}")
-                self.base_url = next_url
-                await self._initialize_client(retry_count + 1)
-            else:
-                raise ExchangeError(f"Failed to connect to any Binance API endpoints: {str(e)}")
-
-    def _get_market_filters(self, market: str) -> Dict:
-        """
-        Get market-specific filters and trading rules.
-        
-        Args:
-            market (str): Market symbol in Binance format
-            
-        Returns:
-            Dict: Market filters and trading rules
-        """
-        try:
-            # Check cache first
-            if market in self._market_filters:
-                return self._market_filters[market]
-            
-            # If in test mode, return mock filters
-            if self._is_test_mode:
-                mock_filters = {
-                    'symbol': market,
-                    'status': 'TRADING',
-                    'baseAsset': market[:-4],  # Remove USDT
-                    'quoteAsset': 'USDT',
-                    'permissions': ['SPOT', 'MARGIN'],
-                    'filters': [
-                        {
-                            'filterType': 'PRICE_FILTER',
-                            'minPrice': '0.00000100',
-                            'maxPrice': '100000.00000000',
-                            'tickSize': '0.00000100'
-                        },
-                        {
-                            'filterType': 'LOT_SIZE',
-                            'minQty': '0.00100000',
-                            'maxQty': '100000.00000000',
-                            'stepSize': '0.00100000'
-                        }
-                    ]
-                }
-                self._market_filters[market] = mock_filters
-                return mock_filters
-            
-            # Get exchange info if not cached
-            if not self._exchange_info:
-                raise ExchangeError("Exchange info not initialized")
-            
-            # Find market in exchange info
-            for symbol in self._exchange_info['symbols']:
-                if symbol['symbol'] == market:
-                    self._market_filters[market] = symbol
-                    return symbol
-            
-            raise ValidationError(f"No filters found for market {market}")
-            
-        except Exception as e:
-            raise ValidationError(f"Error getting filters for market {market}: {str(e)}")
-
-    def _get_headers(self) -> Dict[str, str]:
-        """Get headers for API requests."""
-        headers = {
-            'Accept': 'application/json',
-            'User-Agent': 'ultimate-data-fetcher/1.0'
-        }
-        
-        if self.config.credentials:
-            headers.update({
-                'X-MBX-APIKEY': self.config.credentials.api_key
-            })
-            
-        return headers
-
-    async def _handle_weight_limit(self, response: Union[aiohttp.ClientResponse, Dict[str, Any]]) -> None:
-        """
-        Handle rate limiting based on Binance API response headers.
-        
-        Args:
-            response: The response object containing rate limit headers
-        """
-        try:
-            # If response is a dict (from error response), check for retry-after
-            if isinstance(response, dict):
-                retry_after = response.get('retry-after')
-                if retry_after:
-                    sleep_time = int(retry_after)
-                    logger.warning(f"Rate limit hit. Sleeping for {sleep_time}s")
-                    await asyncio.sleep(sleep_time)
-                return
-                
-            # Get rate limit headers
-            used_weight = int(response.headers.get('x-mbx-used-weight-1m', '0'))
-            weight_limit = int(response.headers.get('x-mbx-weight-limit-1m', '1200'))
-            
-            # Calculate remaining weight
-            remaining_weight = weight_limit - used_weight
-            
-            # If we're close to the limit (less than 10% remaining), sleep
-            if remaining_weight < (weight_limit * 0.1):
-                sleep_time = 60  # Sleep for 1 minute to allow weight to reset
-                logger.warning(f"Rate limit approaching ({remaining_weight}/{weight_limit}). Sleeping for {sleep_time}s")
-                await asyncio.sleep(sleep_time)
-                
-            # Always check for 429 status
-            if response.status == 429:
-                retry_after = int(response.headers.get('Retry-After', '60'))
-                logger.warning(f"Rate limit exceeded. Sleeping for {retry_after}s")
-                await asyncio.sleep(retry_after)
-                
-        except (KeyError, ValueError, AttributeError) as e:
-            logger.warning(f"Error handling rate limit: {e}")
-
-    async def _make_request(self, method: str, endpoint: str, params: Dict = None) -> Any:
-        """
-        Make a request to the Binance API with rate limiting.
-        
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            endpoint: API endpoint
-            params: Query parameters
-            
-        Returns:
-            Response data
-            
-        Raises:
-            ExchangeError: If request fails
-        """
-        url = f"{self.base_url}{endpoint}"
-        headers = self._get_headers()
-        
-        for attempt in range(3):  # Max 3 retries
-            try:
-                # Ensure we have a session
-                if self._session is None:
-                    await self.start()
-                
-                async with self._session.request(method, url, params=params, headers=headers) as response:
-                    # Handle rate limiting
-                    await self._handle_weight_limit(response)
-                    
-                    if response.status == 200:
-                        return await response.json()
-                    elif response.status == 429:
-                        # Rate limit hit - already handled in _handle_weight_limit
-                        continue
-                    else:
-                        error_data = await response.text()
-                        raise ExchangeError(f"Request failed: {response.status} - {error_data}")
-                            
-            except aiohttp.ClientError as e:
-                if attempt == 2:  # Last attempt
-                    raise ExchangeError(f"Request failed after 3 attempts: {e}")
-                logger.warning(f"Request attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(1)  # Wait before retry
-                
-        raise ExchangeError("Request failed after all retries")
-
-    async def _make_request_with_retry(self, func: Callable, *args, **kwargs) -> Any:
-        """
-        Make a request with retry logic.
-        
-        Args:
-            func: Function to call
-            *args: Positional arguments for the function
-            **kwargs: Keyword arguments for the function
-            
-        Returns:
-            Response from the function
-            
-        Raises:
-            ExchangeError: If all retries fail
-        """
-        for attempt in range(3):  # Max 3 retries
-            try:
-                # Handle both async and regular functions
-                if func is None:
-                    raise ExchangeError("No function provided")
-                    
-                if isinstance(func, dict):
-                    # If we're passed a mock response for testing
-                    await self._handle_weight_limit({
-                        'x-mbx-used-weight-1m': '1',
-                        'x-mbx-weight-limit-1m': '1200'
-                    })
-                    return func
-                    
-                # Call the function and get the result
-                if asyncio.iscoroutinefunction(func):
-                    result = await func(*args, **kwargs)
-                else:
-                    # If it's a bound method that's not a coroutine
-                    method = getattr(func, '__func__', None)
-                    if method and asyncio.iscoroutinefunction(method):
-                        result = await func(*args, **kwargs)
-                    else:
-                        result = func(*args, **kwargs)
-                
-                # Handle rate limiting with a mock response
-                await self._handle_weight_limit({
-                    'x-mbx-used-weight-1m': '1',
-                    'x-mbx-weight-limit-1m': '1200'
-                })
-                
-                return result
-                
-            except Exception as e:
-                if attempt == 2:  # Last attempt
-                    raise ExchangeError(f"Request failed after 3 attempts: {e}")
-                    
-                logger.warning(f"Request attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(1)  # Wait before retry
-                
-        raise ExchangeError("Request failed after all retries")
-
-    def _parse_raw_candle(self, raw_data: List, market: str, resolution: str) -> StandardizedCandle:
-        """Parse raw candle data into StandardizedCandle format."""
-        try:
-            # Binance kline format:
-            # [
-            #   0  Open time
-            #   1  Open
-            #   2  High
-            #   3  Low
-            #   4  Close
-            #   5  Volume
-            #   6  Close time
-            #   7  Quote asset volume
-            #   8  Number of trades
-            #   9  Taker buy base asset volume
-            #   10 Taker buy quote asset volume
-            #   11 Ignore
-            # ]
-            candle = StandardizedCandle(
-                timestamp=self.standardize_timestamp(raw_data[0]),
-                open=float(raw_data[1]),
-                high=float(raw_data[2]),
-                low=float(raw_data[3]),
-                close=float(raw_data[4]),
-                volume=float(raw_data[5]),
-                source='binance',
-                resolution=resolution,
-                market=market,
-                raw_data=raw_data
-            )
-            self.validate_candle(candle)
-            return candle
-        except (IndexError, ValueError) as e:
-            raise ValidationError(f"Error parsing Binance candle data: {str(e)}")
+    async def stop(self):
+        """Stop the handler."""
+        self.client = None
+        await super().stop()
+        logger.info("Stopped Binance exchange handler")
 
     async def fetch_historical_candles(
         self,
@@ -471,121 +68,60 @@ class BinanceHandler(BaseExchangeHandler):
         resolution: str = "1",
         start_time: datetime = None,
         end_time: datetime = None
-    ) -> List[Dict]:
+    ) -> List[StandardizedCandle]:
         """
-        Fetch historical candles for a market using public endpoints.
+        Fetch historical candles for a market.
         
         Args:
-            market (str): Market symbol (e.g., 'BTC-USDT')
-            time_range (TimeRange, optional): Time range to fetch data for
-            resolution (str): Candle resolution (default: "1")
-            start_time (datetime, optional): Start time (if time_range not provided)
-            end_time (datetime, optional): End time (if time_range not provided)
+            market: Market symbol (e.g., 'BTCUSDT')
+            time_range: Time range to fetch data for
+            resolution: Candle resolution (default: "1")
+            start_time: Start time (if time_range not provided)
+            end_time: End time (if time_range not provided)
             
         Returns:
-            List[Dict]: List of candles with OHLCV data
+            List[StandardizedCandle]: List of standardized candles
         """
         try:
-            # Special handling for test cases
-            if market == "INVALID-MARKET" and 'pytest' in sys.modules:
-                raise ExchangeError(f"Failed to fetch historical candles: Invalid market {market}")
-                
-            if not self.validate_market(market):
-                raise ValidationError(f"Invalid market {market}")
-            
-            # Convert market symbol
-            binance_symbol = self._convert_market_symbol(market)
-            
             # Handle time range
             if time_range:
                 start_time = time_range.start
                 end_time = time_range.end
             elif not (start_time and end_time):
                 raise ValidationError("Must provide either time_range or both start_time and end_time")
-            
-            # Get candle data
+
+            # Convert resolution to Binance format
             interval = self.timeframe_map.get(resolution, "1m")
+            
+            # Convert times to milliseconds
             start_ts = int(start_time.timestamp() * 1000)
             end_ts = int(end_time.timestamp() * 1000)
-            
-            if self._is_test_mode:
-                # Generate mock candles and convert them to StandardizedCandle objects
-                mock_candles = self._generate_mock_candles(start_ts, end_ts, interval)
-                standardized_candles = []
-                
-                for candle in mock_candles:
-                    # Convert timestamp from milliseconds to datetime
-                    timestamp = datetime.fromtimestamp(candle['timestamp'] / 1000, tz=timezone.utc)
-                    
-                    standardized_candle = StandardizedCandle(
-                        timestamp=timestamp,
-                        open=candle['open'],
-                        high=candle['high'],
-                        low=candle['low'],
-                        close=candle['close'],
-                        volume=candle['volume'],
-                        source='binance',
-                        resolution=resolution,
-                        market=market,
-                        raw_data=candle
-                    )
-                    standardized_candles.append(standardized_candle)
-                
-                return standardized_candles
-            
-            # Use public endpoint directly if client isn't initialized
-            if not self.client:
-                # Ensure we have a session
-                if self._session is None:
-                    await self.start()
-                
-                url = f"{self.base_url}/api/v3/klines"
-                params = {
-                    'symbol': binance_symbol,
-                    'interval': interval,
-                    'startTime': start_ts,
-                    'endTime': end_ts,
-                    'limit': 1000
-                }
-                
-                async with self._session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Parse response
-                        candles = []
-                        for candle in data:
-                            candles.append(self._parse_raw_candle(candle, market, resolution))
-                        return candles
-                    else:
-                        error_text = await response.text()
-                        raise ExchangeError(f"Failed to fetch historical candles: {response.status} - {error_text}")
-            else:
-                # Make API request using the client
-                response = await self._make_request_with_retry(
-                    self.client.klines,
-                    symbol=binance_symbol,
+
+            try:
+                # Fetch candles using the SDK
+                klines = self.client.klines(
+                    symbol=market,
                     interval=interval,
                     startTime=start_ts,
                     endTime=end_ts,
-                    limit=1000
+                    limit=1000  # Maximum allowed by Binance
                 )
                 
-                # Parse response
+                # Convert to StandardizedCandle format
                 candles = []
-                for candle in response:
-                    candles.append(self._parse_raw_candle(candle, market, resolution))
+                for kline in klines:
+                    candle = self._convert_to_standardized_candle(kline, market, resolution)
+                    candles.append(candle)
                 
                 return candles
-            
-        except ValidationError as e:
-            logger.error(f"Error fetching historical candles for {market}: {str(e)}")
-            raise ExchangeError(f"Failed to fetch historical candles: {str(e)}")
-        except ExchangeError:
-            # Re-raise ExchangeError exceptions
-            raise
+
+            except ClientError as e:
+                logger.error(f"Binance API error: {e}")
+                raise ExchangeError(f"Failed to fetch historical candles: {e}")
+
         except Exception as e:
-            logger.error(f"Error fetching historical candles for {market}: {str(e)}")
-            raise ExchangeError(f"Failed to fetch historical candles: {str(e)}")
+            logger.error(f"Error fetching historical candles for {market}: {e}")
+            raise ExchangeError(f"Failed to fetch historical candles: {e}")
 
     async def fetch_live_candles(
         self,
@@ -596,460 +132,362 @@ class BinanceHandler(BaseExchangeHandler):
         Fetch latest candle for a market.
         
         Args:
-            market (str): Market symbol (e.g., 'BTC-USDT')
-            resolution (str): Candle resolution (default: "1")
+            market: Market symbol (e.g., 'BTCUSDT')
+            resolution: Candle resolution (default: "1")
             
         Returns:
             StandardizedCandle: Latest candle data
         """
         try:
-            if not self.validate_market(market):  # Now sync call
-                raise ValidationError(f"Invalid market {market}")
-            
-            # Convert market symbol
-            binance_symbol = self._convert_market_symbol(market)
-            
-            if self._is_test_mode:
-                return self._generate_mock_candle()
-            
-            # Get latest candle
+            # Convert resolution to Binance format
             interval = self.timeframe_map.get(resolution, "1m")
-            response = await self._make_request_with_retry(
-                self.client.klines,
-                symbol=binance_symbol,
-                interval=interval,
-                limit=1
-            )
             
-            if not response:
-                raise ExchangeError(f"No data returned for {market}")
-            
-            # Parse response
-            return self._parse_raw_candle(response[0], market, resolution)
-            
+            try:
+                # Fetch the most recent candle
+                klines = self.client.klines(
+                    symbol=market,
+                    interval=interval,
+                    limit=1  # We only need the latest candle
+                )
+                
+                if not klines:
+                    raise ExchangeError(f"No data returned for {market}")
+                
+                # Convert to StandardizedCandle format
+                return self._convert_to_standardized_candle(klines[0], market, resolution)
+
+            except ClientError as e:
+                logger.error(f"Binance API error: {e}")
+                raise ExchangeError(f"Failed to fetch live candle: {e}")
+
         except Exception as e:
-            logger.error(f"Error fetching live candle for {market}: {str(e)}")
-            raise ExchangeError(f"Failed to fetch live candle: {str(e)}")
+            logger.error(f"Error fetching live candle for {market}: {e}")
+            raise ExchangeError(f"Failed to fetch live candle: {e}")
 
-    def _generate_mock_candle(self) -> Dict:
-        """Generate a mock candle for testing."""
-        now = datetime.now(timezone.utc)
-        return {
-            'timestamp': int(now.timestamp() * 1000),
-            'open': 50000.0,
-            'high': 51000.0,
-            'low': 49000.0,
-            'close': 50500.0,
-            'volume': 100.0
-        }
-
-    def _generate_mock_candles(
+    def _convert_to_standardized_candle(
         self,
-        start_ts: int,
-        end_ts: int,
-        interval: str
-    ) -> List[Dict]:
-        """Generate mock candles for testing."""
-        candles = []
-        current_ts = start_ts
-        
-        # Get interval in minutes
-        if interval.endswith('m'):
-            minutes = int(interval[:-1])
-        elif interval.endswith('h'):
-            minutes = int(interval[:-1]) * 60
-        elif interval.endswith('d'):
-            minutes = int(interval[:-1]) * 1440
-        else:
-            minutes = 1
-            
-        interval_ms = minutes * 60 * 1000
-        
-        while current_ts <= end_ts:
-            candles.append({
-                'timestamp': current_ts,
-                'open': 50000.0,
-                'high': 51000.0,
-                'low': 49000.0,
-                'close': 50500.0,
-                'volume': 100.0
-            })
-            current_ts += interval_ms
-            
-        return candles
-
-    async def get_markets(self) -> List[str]:
-        """Get list of available markets using public endpoints."""
-        if self._is_test_mode:
-            return self._mock_markets
-        try:
-            if not self._available_markets:
-                # Use public endpoint to fetch exchange info
-                # Ensure we have a session
-                if self._session is None:
-                    await self.start()
-                
-                url = f"{self.base_url}/api/v3/exchangeInfo"
-                
-                async with self._session.get(url) as response:
-                    if response.status == 200:
-                        exchange_info = await response.json()
-                        
-                        # Process symbols
-                        markets = []
-                        for symbol_info in exchange_info["symbols"]:
-                            if (
-                                symbol_info["status"] == "TRADING" and
-                                symbol_info["quoteAsset"] == "USDT"
-                            ):
-                                symbol = symbol_info["symbol"]
-                                base_asset = symbol_info["baseAsset"]
-                                
-                                # Register both formats
-                                self.symbol_mapper.register_symbol(
-                                    exchange="binance",
-                                    symbol=symbol,
-                                    base_asset=base_asset,
-                                    quote_asset="USDT",
-                                    is_perpetual=False
-                                )
-                                
-                                standard_format = f"{base_asset}-USDT"
-                                self.symbol_mapper.register_symbol(
-                                    exchange="binance",
-                                    symbol=standard_format,
-                                    base_asset=base_asset,
-                                    quote_asset="USDT",
-                                    is_perpetual=False
-                                )
-                                
-                                markets.append(symbol)
-                        
-                        self._available_markets = markets
-                    else:
-                        error_text = await response.text()
-                        raise ExchangeError(f"Failed to fetch exchange info: {response.status} - {error_text}")
-                        
-            return self._available_markets
-            
-        except Exception as e:
-            logger.error(f"Error fetching markets: {str(e)}")
-            raise ExchangeError(f"Failed to fetch markets: {str(e)}")
-
-    async def get_exchange_info(self) -> Dict:
+        candle_data: List[Any],
+        market: str,
+        resolution: str
+    ) -> StandardizedCandle:
         """
-        Get detailed exchange information including trading rules and filters.
+        Convert Binance candle data to StandardizedCandle format.
         
-        Returns:
-            Dict containing exchange information with the following key data:
-            - timezone: Exchange timezone
-            - serverTime: Current server time
-            - symbols: List of trading symbols with their rules:
-                - symbol: Trading pair name
-                - status: Trading status (e.g., TRADING)
-                - baseAsset: Base currency
-                - quoteAsset: Quote currency
-                - permissions: List of allowed operations (e.g., SPOT, MARGIN)
-                - filters: List of filters with trading rules
+        Binance kline format:
+        [
+            0: Open time
+            1: Open
+            2: High
+            3: Low
+            4: Close
+            5: Volume
+            6: Close time
+            7: Quote asset volume
+            8: Number of trades
+            9: Taker buy base asset volume
+            10: Taker buy quote asset volume
+            11: Ignore
+        ]
         """
-        try:
-            if self._is_test_mode:
-                # Return mock exchange info with USDT pairs
-                mock_info = {
-                    'timezone': 'UTC',
-                    'serverTime': int(datetime.now(timezone.utc).timestamp() * 1000),
-                    'symbols': []
-                }
-                
-                for market in self.mock_markets['spot']['standard_format']:
-                    mock_info['symbols'].append({
-                        'symbol': market,
-                        'status': 'TRADING',
-                        'baseAsset': market[:-4],  # Remove USDT
-                        'quoteAsset': 'USDT',
-                        'permissions': ['SPOT', 'MARGIN'],
-                        'filters': [
-                            {
-                                'filterType': 'PRICE_FILTER',
-                                'minPrice': '0.00000100',
-                                'maxPrice': '100000.00000000',
-                                'tickSize': '0.00000100'
-                            },
-                            {
-                                'filterType': 'LOT_SIZE',
-                                'minQty': '0.00100000',
-                                'maxQty': '100000.00000000',
-                                'stepSize': '0.00100000'
-                            }
-                        ]
-                    })
-                return mock_info
-            
-            # Use the client for market data
-            response = await self._make_request_with_retry(
-                self.client.exchange_info if hasattr(self, 'client') else None
-            )
-            
-            # Cache the response
-            self._exchange_info = response
-            
-            # Register all symbols with the mapper
-            for symbol in response['symbols']:
-                if symbol['status'] == 'TRADING':
-                    standard_symbol = f"{symbol['baseAsset']}-{symbol['quoteAsset']}"
-                    
-                    # Register both formats
-                    self.symbol_mapper.register_symbol(
-                        exchange="binance",
-                        symbol=symbol['symbol'],
-                        base_asset=symbol['baseAsset'],
-                        quote_asset=symbol['quoteAsset'],
-                        is_perpetual=False
-                    )
-                    
-                    self.symbol_mapper.register_symbol(
-                        exchange="binance",
-                        symbol=standard_symbol,
-                        base_asset=symbol['baseAsset'],
-                        quote_asset=symbol['quoteAsset'],
-                        is_perpetual=False
-                    )
-            
-            return response
-            
-        except Exception as e:
-            raise ExchangeError(f"Failed to get exchange info: {str(e)}")
+        return StandardizedCandle(
+            timestamp=datetime.fromtimestamp(candle_data[0] / 1000, tz=timezone.utc),
+            open=float(candle_data[1]),
+            high=float(candle_data[2]),
+            low=float(candle_data[3]),
+            close=float(candle_data[4]),
+            volume=float(candle_data[5]),
+            market=market,
+            resolution=resolution,
+            source="binance",
+            trade_count=int(candle_data[8]),
+            additional_info={
+                'quote_volume': float(candle_data[7]),
+                'taker_buy_base_volume': float(candle_data[9]),
+                'taker_buy_quote_volume': float(candle_data[10])
+            }
+        )
 
     def validate_market(self, market: str) -> bool:
-        """
-        Validate if a market is supported.
-        
-        Args:
-            market (str): Market symbol (e.g., 'BTC-USDT' or 'BTCUSDT')
-            
-        Returns:
-            bool: True if market is valid
-        """
-        # Special handling for test cases
-        if market is None or not isinstance(market, str):
-            if 'pytest' in sys.modules:
-                # In test mode, raise ValidationError for None, empty string, or non-string types
-                raise ValidationError("Market must be a string")
-            return False
-            
-        if not market:  # Empty string
-            if 'pytest' in sys.modules:
-                raise ValidationError("Market must be a string")
-            return False
-            
-        try:
-            if self._is_test_mode:
-                # In test mode, check if market is in mock markets
-                if market in self._mock_markets:
-                    return True
-                    
-                # Also try converting the market symbol
-                converted_market = self._convert_market_symbol(market)
-                return converted_market in self._mock_markets
-                
-            # For real mode, check if market is in available markets
-            if not self._available_markets:
-                # If markets haven't been fetched yet, accept common ones
-                common_markets = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-                if market in common_markets:
-                    return True
-                    
-                # Try converting from standard format
-                converted_market = self._convert_market_symbol(market)
-                return converted_market in common_markets
-            
-            # Check if market is in available markets
-            if market in self._available_markets:
-                return True
-                
-            # Try converting from standard format
-            converted_market = self._convert_market_symbol(market)
-            return converted_market in self._available_markets
-                
-        except ValidationError:
-            # Re-raise ValidationError exceptions
-            raise
-        except Exception as e:
-            logger.error(f"Error validating market {market}: {str(e)}")
-            return False
+        """Simple market validation."""
+        # For public data fetching, we'll let Binance validate the market
+        # This will return True and let the API call handle any invalid markets
+        return True
 
-    async def validate_standard_symbol(self, market: str) -> bool:
-        """
-        Asynchronously validate if a market is supported.
+    def _convert_resolution(self, resolution: str) -> str:
+        """Convert standard resolution to Binance format."""
+        # Common formats that might be already compatible
+        if resolution in ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M']:
+            return resolution
+            
+        # Convert from our standard format
+        mapping = {
+            '1': '1m',
+            '3': '3m',
+            '5': '5m', 
+            '15': '15m',
+            '30': '30m',
+            '60': '1h',
+            '120': '2h',
+            '240': '4h',
+            '360': '6h',
+            '480': '8h',
+            '720': '12h',
+            '1D': '1d',
+            '3D': '3d',
+            '1W': '1w',
+            '1M': '1M'
+                            }
         
-        Args:
-            market (str): Market symbol (e.g., 'BTC-USDT' or 'BTCUSDT')
+        if resolution in mapping:
+            return mapping[resolution]
             
-        Returns:
-            bool: True if market is valid
-        """
-        # Special handling for test cases
-        if market is None or not isinstance(market, str):
-            if 'pytest' in sys.modules:
-                # In test mode, raise ValidationError for None, empty string, or non-string types
-                raise ValidationError("Market must be a string")
-            return False
-            
-        if not market:  # Empty string
-            if 'pytest' in sys.modules:
-                raise ValidationError("Market must be a string")
-            return False
-            
-        try:
-            if self._is_test_mode:
-                # In test mode, check if market is in mock markets
-                if market in self._mock_markets:
-                    return True
-                    
-                # Also try converting the market symbol
-                converted_market = self._convert_market_symbol(market)
-                return converted_market in self._mock_markets
-                
-            # For real mode, check if market is in available markets
-            if not self._available_markets:
-                # If markets haven't been fetched yet, try to fetch them
-                try:
-                    markets = await self.get_markets()
-                    self._available_markets = markets
-                    
-                    # Check if market is in available markets
-                    if market in self._available_markets:
-                        return True
-                        
-                    # Try converting from standard format
-                    converted_market = self._convert_market_symbol(market)
-                    return converted_market in self._available_markets
-                except Exception as e:
-                    logger.warning(f"Failed to fetch markets: {e}. Falling back to common markets check.")
-                    # If we can't fetch markets, accept common ones
-                    common_markets = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-                    if market in common_markets:
-                        return True
-                        
-                    # Try converting from standard format
-                    converted_market = self._convert_market_symbol(market)
-                    return converted_market in common_markets
-            
-            # Check if market is in available markets
-            if market in self._available_markets:
-                return True
-                
-            # Try converting from standard format
-            converted_market = self._convert_market_symbol(market)
-            return converted_market in self._available_markets
-                
-        except ValidationError:
-            # Re-raise ValidationError exceptions
-            raise
-        except Exception as e:
-            logger.error(f"Error validating market {market}: {str(e)}")
-            return False
+        # Default to 1h if not recognized
+        logger.warning(f"Resolution {resolution} not recognized, defaulting to 1h")
+        return '1h'
 
-    def _convert_market_symbol(self, market: str) -> str:
-        """
-        Convert market symbol to Binance format.
+    def _get_interval_seconds(self, interval: str) -> int:
+        """Get the number of seconds for a given interval."""
+        # Extract the number and unit
+        number = int(''.join(filter(str.isdigit, interval)))
+        unit = ''.join(filter(str.isalpha, interval))
         
-        Args:
-            market (str): Market symbol (e.g., 'BTC-USDT' or 'BTCUSDT')
+        # Convert to seconds
+        if unit == 'm':
+            return number * 60
+        elif unit == 'h':
+            return number * 60 * 60
+        elif unit == 'd':
+            return number * 24 * 60 * 60
+        elif unit == 'w':
+            return number * 7 * 24 * 60 * 60
+        elif unit == 'M':
+            return number * 30 * 24 * 60 * 60  # Approximate
+        else:
+            return 3600  # Default to 1h
+
+    def validate_standard_symbol(self, market: str) -> bool:
+        """Validate a standard market symbol format."""
+        # Regular symbols like BTC-USDT need to be converted to BTCUSDT
+        converted_market = market.replace('-', '')
+        
+        # Check if it's in the available markets
+        return converted_market in self._available_markets
+
+    async def convert_standard_symbol(self, market: str) -> str:
+        """Convert a standard market symbol format to exchange-specific format."""
+        # Regular symbols like BTC-USDT need to be converted to BTCUSDT
+        return market.replace('-', '')
+
+    def validate_exchange_symbol(self, market: str) -> bool:
+        """Validate an exchange-specific market symbol format."""
+        # Check if it's in the available markets
+        return market in self._available_markets
+        
+    async def convert_exchange_symbol(self, market: str) -> str:
+        """Convert an exchange-specific market symbol format to standard format."""
+        # Convert from BTCUSDT to BTC-USDT
+        # This is a basic implementation - you may need more sophisticated logic
+        stablecoins = ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'USDP', 'FDUSD']
+        for stable in stablecoins:
+            if market.endswith(stable):
+                base = market[:-len(stable)]
+                return f"{base}-{stable}"
+                
+        # Handle USD pairs
+        if market.endswith('USD'):
+            base = market[:-3]
+            return f"{base}-USD"
             
-        Returns:
-            str: Market symbol in Binance format (e.g., 'BTCUSDT')
-        """
+        # Handle BTC pairs
+        if market.endswith('BTC'):
+            base = market[:-3]
+            return f"{base}-BTC"
+            
+        # Handle ETH pairs
+        if market.endswith('ETH'):
+            base = market[:-3]
+            return f"{base}-ETH"
+        
+        # If no specific handling, return as is with dash
+        # This might not be correct for all cases
+        return market
+
+    async def get_account_balance(self) -> Dict[str, float]:
+        """Get account balance."""
+        if not self._api_key or not self._api_secret:
+            raise ExchangeError("API credentials required for account operations")
+            
         try:
-            # If already in Binance format, return as is
-            if market.isupper() and "-" not in market and "USDT" in market:
-                return market
+            response = await self._api_request('GET', '/api/v3/account', signed=True, weight=10)
             
-            # Try to use the symbol mapper first
+            balances = {}
+            for balance in response.get('balances', []):
+                asset = balance.get('asset')
+                free = float(balance.get('free', 0))
+                locked = float(balance.get('locked', 0))
+                total = free + locked
+                
+                if total > 0:
+                    balances[asset] = {
+                        'free': free,
+                        'locked': locked,
+                        'total': total
+                    }
+                    
+            return balances
+            
+        except Exception as e:
+            logger.error(f"Error getting account balance: {e}")
+            raise
+
+    async def get_ticker(self, market: str) -> Dict[str, Any]:
+        """Get ticker information for a market."""
+        try:
+            response = await self._api_request('GET', '/api/v3/ticker/24hr', params={'symbol': market}, weight=1)
+            return {
+                'symbol': response.get('symbol'),
+                'last_price': float(response.get('lastPrice', 0)),
+                'price_change': float(response.get('priceChange', 0)),
+                'price_change_percent': float(response.get('priceChangePercent', 0)),
+                'high': float(response.get('highPrice', 0)),
+                'low': float(response.get('lowPrice', 0)),
+                'volume': float(response.get('volume', 0)),
+                'quote_volume': float(response.get('quoteVolume', 0)),
+                'open_time': datetime.fromtimestamp(response.get('openTime', 0) / 1000, tz=timezone.utc),
+                'close_time': datetime.fromtimestamp(response.get('closeTime', 0) / 1000, tz=timezone.utc),
+                'trade_count': int(response.get('count', 0))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting ticker for {market}: {e}")
+            raise
+
+    @staticmethod
+    async def self_test():
+        """Run a self-test to verify the handler is working correctly."""
+        try:
+            # Create handler with default config
+            config = ExchangeConfig(name="binance")
+            handler = BinanceHandler(config)
+            
+            # Start the handler
+            await handler.start()
+            
             try:
-                binance_symbol = self.symbol_mapper.to_exchange_symbol("binance", market)
-                if binance_symbol and "-" not in binance_symbol:
-                    return binance_symbol
-            except ValueError:
-                pass
-                
-            # Handle standard format (e.g., BTC-USDT)
-            if "-" in market:
-                base, quote = market.split("-")
-                # Handle perpetual markets (e.g., BTC-PERP)
-                if quote == "PERP":
-                    return f"{base.upper()}USDT"
-                # Convert USD or USDC to USDT for Binance
-                if quote in ["USD", "USDC"]:
-                    quote = "USDT"
-                return f"{base.upper()}{quote.upper()}"
-                
-            # Handle other formats
-            result = market.replace("-", "").upper()
-            return result
+                # Test getting markets
+                markets = await handler.get_markets()
+                print(f"Fetched {len(markets)} markets")
+                if not markets:
+                    print("Error: No markets found")
+                    return False
             
+                # Test fetching candles for BTC/USDT
+                if 'BTCUSDT' in markets:
+                    test_market = 'BTCUSDT'
+                else:
+                    test_market = markets[0]
+                    
+                print(f"Testing with market: {test_market}")
+                
+                # Test fetching historical candles
+                end_time = datetime.now(timezone.utc)
+                start_time = end_time - timedelta(days=1)
+                
+                candles = await handler.fetch_historical_candles(
+                    test_market,
+                    TimeRange(start=start_time, end=end_time),
+                    resolution="1h"
+                )
+                
+                print(f"Fetched {len(candles)} historical candles")
+                if not candles:
+                    print("Error: No candles found")
+                    return False
+                
+                # Test fetching live candle
+                live_candle = await handler.fetch_live_candles(test_market, "1h")
+                print(f"Fetched live candle: {live_candle}")
+                
+                print("All tests passed!")
+                return True
+                
+            finally:
+                # Stop the handler
+                await handler.stop()
+                
         except Exception as e:
-            logger.error(f"Error converting market symbol {market}: {str(e)}")
-            # For safety, ensure we return a format without hyphens
-            return market.replace("-", "").upper()
+            print(f"Error during self-test: {e}")
+            return False
 
-    def _initialize_symbol_mapper(self):
-        """Initialize symbol mapper with common pairs."""
-        # Register common pairs with the symbol mapper
-        common_pairs = [
-            ("BTC", "USDT"),
-            ("ETH", "USDT"),
-            ("SOL", "USDT"),
-            ("BTC", "USD"),
-            ("ETH", "USD"),
-            ("SOL", "USD"),
-            ("BTC", "USDC"),
-            ("ETH", "USDC"),
-            ("SOL", "USDC")
-        ]
+    async def _make_request_with_retry(self, method, *args, max_retries=3, **kwargs):
+        """
+        Make an API request with retry logic.
         
-        for base, quote in common_pairs:
-            # Register Binance format
-            binance_symbol = f"{base}{quote}"
-            # Register standard format
-            standard_symbol = f"{base}-{quote}"
+        Args:
+            method: The API method to call
+            *args: Positional arguments for the method
+            max_retries: Maximum number of retry attempts
+            **kwargs: Keyword arguments for the method
             
-            # Register both formats
-            self.symbol_mapper.register_symbol(
-                exchange="binance",
-                symbol=binance_symbol,
-                base_asset=base,
-                quote_asset=quote,
-                is_perpetual=False
-            )
+        Returns:
+            The API response
             
-            self.symbol_mapper.register_symbol(
-                exchange="binance",
-                symbol=standard_symbol,
-                base_asset=base,
-                quote_asset=quote,
-                is_perpetual=False
-            )
+        Raises:
+            ExchangeError: If all retries fail
+        """
+        last_error = None
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Check rate limits before making the request
+                await self._check_rate_limits()
+                
+                # Make the request
+                response = await method(*args, **kwargs)
+                return response
+                
+            except ClientError as e:
+                error_code = e.error_code if hasattr(e, 'error_code') else None
+                
+                # Check if error is retryable
+                if error_code in RETRY_ERROR_CODES:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        # Exponential backoff: 1s, 2s, 4s, ...
+                        wait_time = 2 ** (retry_count - 1)
+                        logger.warning(f"Retrying request after {wait_time}s (attempt {retry_count}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                        
+                # If not retryable or max retries reached, raise the error
+                last_error = e
+                break
+                
+            except Exception as e:
+                # For other exceptions, only retry on connection errors
+                if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        wait_time = 2 ** (retry_count - 1)
+                        logger.warning(f"Retrying request after {wait_time}s (attempt {retry_count}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                        
+                last_error = e
+                break
+        
+        # If we get here, all retries failed
+        error_msg = str(last_error) if last_error else "Unknown error"
+        raise ExchangeError(f"Request failed after {max_retries} retries: {error_msg}")
+
+async def main():
+    """Example usage of BinanceHandler."""
+    await BinanceHandler.self_test()
+
+if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
             
-        # Also register perpetual pairs
-        perp_pairs = ["BTC", "ETH", "SOL"]
-        for base in perp_pairs:
-            # Register both formats for perpetuals
-            perp_symbol = f"{base}USDT"  # Binance uses USDT for perps
-            standard_perp = f"{base}-PERP"
-            
-            self.symbol_mapper.register_symbol(
-                exchange="binance",
-                symbol=perp_symbol,
-                base_asset=base,
-                quote_asset="USDT",
-                is_perpetual=True
-            )
-            
-            self.symbol_mapper.register_symbol(
-                exchange="binance",
-                symbol=standard_perp,
-                base_asset=base,
-                quote_asset="PERP",
-                is_perpetual=True
-            )
+    # Run the example
+    asyncio.run(main())

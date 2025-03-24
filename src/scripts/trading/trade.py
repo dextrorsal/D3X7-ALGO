@@ -13,7 +13,8 @@ from pathlib import Path
 
 from src.core.config import Config
 from src.utils.log_setup import setup_logging
-from src.trading.live_trader import LiveTrader
+from src.trading.jup.jup_adapter import JupiterAdapter
+from src.trading.drift.drift_adapter import DriftAdapter
 from src.utils.indicators.wrapper_supertrend import SupertrendIndicator
 from src.utils.indicators.wrapper_logistic import LogisticRegressionIndicator
 from src.utils.indicators.wrapper_knn import kNNIndicator
@@ -21,7 +22,6 @@ from src.utils.indicators.wrapper_lorentzian import LorentzianIndicator
 from src.utils.strategy.multi_indicator_strategy import MultiIndicatorStrategy
 from src.utils.strategy.segmented import SegmentedStrategy
 from src.utils.strategy.sol_spot import SOLSpotStrategy
-from src.trading.devnet.drift_account_manager import DriftAccountManager
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ async def run_live_trading(args):
         logger.info("Starting devnet test mode...")
         try:
             # Initialize account manager
-            account_manager = DriftAccountManager()
+            account_manager = DriftAdapter()
             
             # Create strategy if specified
             strategy = None
@@ -228,12 +228,17 @@ async def run_live_trading(args):
     
     # Create live trader
     try:
-        trader = LiveTrader(
-            config=config,
-            strategy=strategy,
-            exchange_name=args.exchange
-        )
-        logger.info(f"Initialized live trader for {args.exchange}")
+        if args.exchange.lower() == "jupiter":
+            trader = JupiterAdapter(
+                config_path=args.config_file,
+                network=args.network
+            )
+        else:  # Drift
+            trader = DriftAdapter(
+                config=config,
+                strategy=strategy
+            )
+        logger.info(f"Initialized trader for {args.exchange}")
     except Exception as e:
         logger.error(f"Error initializing trader: {e}")
         if args.debug:

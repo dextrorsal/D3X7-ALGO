@@ -13,6 +13,8 @@ import base64
 import os
 from pathlib import Path
 import random
+import argparse
+from tabulate import tabulate
 from src.utils.wallet.sol_rpc import get_solana_client
 import aiohttp
 from solana.rpc.async_api import AsyncClient
@@ -106,6 +108,11 @@ class JupiterAdapter:
         self.tokens = NETWORK_TOKENS[self.network]
         self.base_url = "https://quote-api.jup.ag/v6"
         
+        # Add trade logging
+        self.log_dir = Path("data/trade_logs")
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.trade_log_file = self.log_dir / f"jup_trade_log_{datetime.now().strftime('%Y%m%d')}.json"
+        
     async def connect(self) -> bool:
         """
         Connect to Jupiter
@@ -122,7 +129,7 @@ class JupiterAdapter:
             logger.info(f"Connected to Solana {self.network} node version: {version}")
             
             # Initialize wallet
-            self.wallet = get_wallet()
+            self.wallet = await get_wallet()
             logger.info(f"Loaded wallet with pubkey: {self.wallet.pubkey}")
             
             self.connected = True
@@ -519,3 +526,171 @@ class JupiterAdapter:
         self.connected = False
         self.client = None
         self._session = None
+
+    async def log_trade(self, trade_details: Dict):
+        """Log trade details to file"""
+        trade_log = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **trade_details
+        }
+        
+        with open(self.trade_log_file, "a") as f:
+            f.write(json.dumps(trade_log) + "\n")
+    
+    async def get_route_metrics(self, market: str, amount: float) -> Dict:
+        """
+        Get comprehensive route metrics for a potential swap
+        
+        Args:
+            market: Market symbol (e.g., "SOL-USDC")
+            amount: Input amount
+            
+        Returns:
+            Dictionary with route metrics
+        """
+        routes = await self.get_route_options(market, amount)
+        if not routes:
+            return {}
+            
+        best_route = routes[0]
+        return {
+            "price": best_route["price"],
+            "price_impact_pct": best_route.get("priceImpactPct", 0),
+            "min_output": best_route.get("minOutputAmount", 0),
+            "route_count": len(routes),
+            "best_route_hops": len(best_route.get("routePlan", [])),
+            "fee_estimates": {
+                "platform_fee": best_route.get("platformFee", 0),
+                "network_fee": best_route.get("networkFee", 0)
+            }
+        }
+    
+    @classmethod
+    async def cli(cls):
+        """CLI interface for Jupiter adapter"""
+        parser = argparse.ArgumentParser(description="Jupiter DEX CLI")
+        subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+        
+        # Price command
+        price_parser = subparsers.add_parser("price", help="Get market price")
+        price_parser.add_argument("market", help="Market symbol (e.g., SOL-USDC)")
+        
+        # Balance command
+        balance_parser = subparsers.add_parser("balance", help="Get account balances")
+        
+        # Quote command
+        quote_parser = subparsers.add_parser("quote", help="Get swap quote")
+        quote_parser.add_argument("market", help="Market symbol (e.g., SOL-USDC)")
+        quote_parser.add_argument("amount", type=float, help="Input amount")
+        
+        # Route command
+        route_parser = subparsers.add_parser("route", help="Get route metrics")
+        route_parser.add_argument("market", help="Market symbol (e.g., SOL-USDC)")
+        route_parser.add_argument("amount", type=float, help="Input amount")
+        
+        # Swap command
+        swap_parser = subparsers.add_parser("swap", help="Execute token swap")
+        swap_parser.add_argument("market", help="Market symbol (e.g., SOL-USDC)")
+        swap_parser.add_argument("amount", type=float, help="Input amount")
+        swap_parser.add_argument("--slippage", type=int, default=50, help="Slippage in basis points (default: 50)")
+        
+        # Monitor command
+        monitor_parser = subparsers.add_parser("monitor", help="Monitor market prices")
+        monitor_parser.add_argument("--markets", nargs="+", default=["SOL-USDC", "BTC-USDC", "ETH-USDC"],
+                                  help="Markets to monitor")
+        
+        args = parser.parse_args()
+        
+        if not args.command:
+            parser.print_help()
+            return
+            
+        adapter = cls()
+        await adapter.connect()
+        
+        try:
+            if args.command == "price":
+                price = await adapter.get_market_price(args.market)
+                print(f"\nMarket: {args.market}")
+                print(f"Price: ${price:,.2f}")
+                
+            elif args.command == "balance":
+                balances = await adapter.get_account_balances()
+                balance_data = [[
+                    token,
+                    f"{amount:.6f}",
+                    f"${await adapter.get_market_price(f'{token}-USDC') * amount:.2f}" if token != "USDC" else f"${amount:.2f}"
+                ] for token, amount in balances.items()]
+                print("\nAccount Balances:")
+                print(tabulate(balance_data, headers=['Token', 'Amount', 'Value (USD)'], tablefmt='simple'))
+                
+            elif args.command == "quote":
+                routes = await adapter.get_route_options(args.market, args.amount)
+                print(f"\nQuotes for {args.amount} {args.market.split('-')[0]}:")
+                for i, route in enumerate(routes[:3], 1):
+                    print(f"\nRoute {i}:")
+                    print(f"Price: ${route['price']:.2f}")
+                    print(f"Price Impact: {route['priceImpactPct']:.2f}%")
+                    print(f"Min Output: {route['minOutputAmount']}")
+                    
+            elif args.command == "route":
+                metrics = await adapter.get_route_metrics(args.market, args.amount)
+                print(f"\nRoute Metrics for {args.amount} {args.market.split('-')[0]}:")
+                print(f"Best Price: ${metrics['price']:.2f}")
+                print(f"Price Impact: {metrics['price_impact_pct']:.2f}%")
+                print(f"Available Routes: {metrics['route_count']}")
+                print(f"Best Route Hops: {metrics['best_route_hops']}")
+                print("\nFee Estimates:")
+                print(f"Platform Fee: {metrics['fee_estimates']['platform_fee']}")
+                print(f"Network Fee: {metrics['fee_estimates']['network_fee']}")
+                
+            elif args.command == "swap":
+                print(f"\nExecuting swap: {args.amount} {args.market.split('-')[0]}")
+                print(f"Slippage: {args.slippage} bps")
+                
+                confirm = input("\nConfirm swap? [y/N]: ")
+                if confirm.lower() != 'y':
+                    print("Swap cancelled")
+                    return
+                    
+                result = await adapter.execute_swap(
+                    market=args.market,
+                    input_amount=args.amount,
+                    slippage_bps=args.slippage
+                )
+                
+                print("\nSwap executed successfully:")
+                print(f"Input: {args.amount} {args.market.split('-')[0]}")
+                print(f"Output: {result['outputAmount']}")
+                print(f"Transaction: {result['transaction']}")
+                
+            elif args.command == "monitor":
+                print(f"\nMonitoring prices for: {', '.join(args.markets)}")
+                print("Press Ctrl+C to exit...")
+                
+                last_prices = {}
+                while True:
+                    prices = {}
+                    for market in args.markets:
+                        prices[market] = await adapter.get_market_price(market)
+                    
+                    print("\033[2J\033[H")  # Clear screen
+                    price_data = [[
+                        market,
+                        f"${price:,.2f}",
+                        "🔼" if price > last_prices.get(market, 0) else "🔽"
+                    ] for market, price in prices.items()]
+                    
+                    print(tabulate(price_data, headers=['Market', 'Price', 'Move'], tablefmt='simple'))
+                    last_prices = prices.copy()
+                    await asyncio.sleep(1)
+                    
+        except KeyboardInterrupt:
+            print("\nExiting...")
+        except Exception as e:
+            logger.error(f"Error: {str(e)}")
+        finally:
+            await adapter.close()
+
+if __name__ == "__main__":
+    asyncio.run(JupiterAdapter.cli())

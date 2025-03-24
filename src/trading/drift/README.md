@@ -1,174 +1,154 @@
-# Drift Protocol Integration
+# D3X7-ALGO Drift Trading Module
 
-This directory contains the core components for interacting with the Drift Protocol, implementing both spot and perpetual futures trading functionality.
+This module provides a comprehensive interface for trading on the Drift Protocol, including both CLI and GUI interfaces.
 
-## Directory Structure
+## Features
 
-```
-/src/trading/
-├── drift/                  # Core Drift protocol components
-│   ├── __init__.py        # Module exports
-│   ├── account_manager.py # Account management and balance tracking
-│   ├── drift_adapter.py   # Core Drift protocol interaction adapter
-│   ├── management/        # CLI and management tools
-│   │   ├── drift_cli.py           # CLI interface
-│   │   ├── drift_wallet_manager.py # Wallet management
-│   │   └── README.md              # Management tools documentation
-│   └── README.md         # This file
-├── devnet/                # Devnet testing components
-│   ├── drift_auth.py     # Authentication for Drift (used by account_manager)
-│   └── ...
-└── tests/                # Test suites
-    ├── drift/           # Main drift tests
-    │   └── test_drift_account_manager.py
-    └── devnet/          # Devnet-specific tests
-        └── test_drift_account_manager.py
-```
+- Position Management (Long/Short)
+- Real-time Position Monitoring
+- Account Health Tracking
+- Subaccount Management
+- GUI Trading Interface
+- Security Validations
+- Risk Management
 
-## Quick Start
+## CLI Usage
 
-### Using the CLI Tools
+The Drift module is integrated into the main D3X7-ALGO CLI. Here are the available commands:
 
-For detailed CLI usage and management tools, see the [Management Tools Documentation](management/README.md).
+### Basic Commands
 
-Basic commands:
 ```bash
-# Show account balances
-./drift_cli.py account balance MAIN 0
+# Launch GUI Trading Interface
+d3x7 drift gui --wallet my_wallet [--dark-mode]
 
-# List subaccounts
-./drift_cli.py subaccount list MAIN
+# List Available Wallets
+d3x7 drift list
 
-# Deposit SOL
-./drift_cli.py account deposit MAIN --token SOL --amount 0.1
+# Check Balance and Positions
+d3x7 drift balance --wallet my_wallet [--subaccount 0]
+
+# List Subaccounts
+d3x7 drift subaccounts [--wallet my_wallet]
 ```
 
-### Using the Python API
+### Trading Commands
+
+```bash
+# Open a Position
+d3x7 drift position --market SOL-PERP --size 1.0 --side long --leverage 2.0 [--reduce-only]
+
+# Close a Position
+d3x7 drift close --market SOL-PERP [--size 0.5]
+
+# Monitor Positions
+d3x7 drift monitor --markets SOL-PERP,BTC-PERP --interval 5
+
+# Check Position Health
+d3x7 drift health --market SOL-PERP
+```
+
+## GUI Features
+
+The GUI interface (`drift_qt_gui.py`) provides:
+
+- Real-time price charts
+- Order book visualization
+- Position management
+- Account overview
+- Trade history
+- Dark/Light theme support
+
+## Examples
+
+Check the `examples/` directory for sample scripts:
+
+1. Basic Trading Example:
+```python
+from d3x7_algo.trading.drift import DriftAdapter
+
+async def basic_trade():
+    adapter = DriftAdapter()
+    await adapter.initialize()
+    
+    # Open a long position
+    await adapter.open_position(
+        market="SOL-PERP",
+        size=1.0,
+        side="long",
+        leverage=2.0
+    )
+```
+
+2. Position Monitoring Example:
+```python
+from d3x7_algo.trading.drift import DriftPositionMonitor
+
+async def monitor_positions():
+    monitor = DriftPositionMonitor()
+    await monitor.start(["SOL-PERP", "BTC-PERP"])
+    
+    # Monitor will emit events for position changes
+    monitor.on_position_update(lambda pos: print(f"Position updated: {pos}"))
+```
+
+## Security Features
+
+The module includes built-in security features:
+
+- Position size limits
+- Leverage restrictions
+- Slippage protection
+- Liquidation warnings
+- Rate limiting
+
+## Configuration
+
+Configure the Drift module through environment variables or the config file:
+
+```env
+DRIFT_MAX_POSITION_SIZE=1000
+DRIFT_MAX_LEVERAGE=5
+DRIFT_SLIPPAGE_TOLERANCE=0.01
+```
+
+## Dependencies
+
+- Python 3.10+
+- PyQt6 (for GUI)
+- driftpy
+- anchorpy
+- solana-py
+
+## Contributing
+
+When adding new features:
+
+1. Follow the existing code structure
+2. Add appropriate tests
+3. Update documentation
+4. Include example usage
+5. Consider security implications
+
+## Error Handling
+
+The module provides detailed error messages for common issues:
+
+- Insufficient margin
+- Invalid position sizes
+- Network connectivity issues
+- Rate limit exceeded
+- Invalid market symbols
+
+## Logging
+
+Comprehensive logging is available at different levels:
 
 ```python
-from src.trading.drift.account_manager import DriftAccountManager
-
-async def example():
-    manager = DriftAccountManager()
-    await manager.setup()
-    
-    try:
-        # Check balances
-        await manager.show_balances()
-        
-        # Deposit SOL
-        await manager.deposit_sol(amount=1.0)
-    finally:
-        # Always clean up
-        await manager.drift_client.unsubscribe()
+import logging
+logging.getLogger("d3x7_algo.trading.drift").setLevel(logging.DEBUG)
 ```
 
-## Component Details
+## Support
 
-### 1. Account Manager (`account_manager.py`)
-
-Handles Drift account management, deposits, withdrawals, and balance tracking.
-
-**Key Features:**
-- SOL and USDC deposit/withdrawal handling
-- Real-time balance checking and display
-- PnL tracking and risk metrics
-- Collateral management
-- Safe transaction handling with confirmations
-
-### 2. Drift Adapter (`drift_adapter.py`)
-
-Core adapter for interacting with Drift Protocol's smart contracts.
-
-**Key Features:**
-- Market price fetching (spot and perpetual)
-- Position tracking and management
-- Order placement and execution
-- Market configuration handling
-
-### 3. Management Tools (`management/`)
-
-CLI and management tools for Drift operations. Features include:
-- Secure wallet management with encryption
-- Subaccount creation and management
-- Balance checking and transfers
-- Interactive CLI interface
-
-For detailed documentation of management features, see the [Management README](management/README.md).
-
-## Environment Setup
-
-### Dependencies
-```bash
-pip install driftpy anchorpy solana-py solders
-```
-
-### Configuration
-The system uses environment variables and configuration files:
-
-1. **Required Environment Variables:**
-   ```bash
-   ENABLE_ENCRYPTION=true    # Enable wallet encryption
-   WALLET_PASSWORD=<secure>  # Wallet encryption password
-   ```
-
-2. **Optional Environment Variables:**
-   ```bash
-   DRIFT_LOG_LEVEL=DEBUG    # Enable detailed logging
-   DRIFT_NETWORK=devnet     # Network selection
-   ```
-
-## Security Best Practices
-
-1. **Wallet Security:**
-   - Always use encrypted wallet files
-   - Store passwords securely
-   - Use the CLI's confirmation prompts
-
-2. **Transaction Safety:**
-   - Verify balances before transactions
-   - Use the `--force` flag carefully
-   - Monitor position risks
-
-3. **Error Handling:**
-   ```python
-   try:
-       await manager.deposit_sol(amount)
-   except Exception as e:
-       logger.error(f"Deposit failed: {e}")
-   finally:
-       await manager.drift_client.unsubscribe()
-   ```
-
-## Integration with Other Components
-
-### Devnet Integration
-- Uses `DriftHelper` from `src.trading.devnet.drift_auth`
-- Supports both mainnet and devnet environments
-- Handles authentication and connection setup
-
-### Jupiter Integration
-- Compatible with Jupiter Aggregator
-- Supports price comparison
-- Enables optimal routing strategies
-
-## Troubleshooting
-
-Common issues and solutions:
-
-1. **Import Errors:**
-   - Always run with `-m` flag from project root
-   - Use correct relative imports
-   - Check PYTHONPATH if needed
-
-2. **Connection Issues:**
-   - Verify RPC endpoint
-   - Check wallet configuration
-   - Ensure proper network selection
-
-3. **Transaction Failures:**
-   - Check account balances
-   - Verify market indices
-   - Monitor compute unit limits
-
-For CLI-specific troubleshooting, see the [Management Tools Documentation](management/README.md).
+For issues and feature requests, please use the issue tracker on our repository.

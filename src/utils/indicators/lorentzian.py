@@ -6,6 +6,8 @@ import pandas as pd
 import talib
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Union
+from .base_indicator import BaseIndicator
+from src.core.config import Config
 
 @dataclass
 class Feature:
@@ -474,3 +476,138 @@ class LorentzianClassification:
             'kernel_estimate': kernel,
             'features': feats
         }
+
+class LorentzianIndicator(BaseIndicator):
+    def __init__(self, config_path='config/indicator_settings.json', **kwargs):
+        config = Config()
+        lorentzian_config = config.get('indicators', {}).get('lorentzian', {})
+        
+        general_settings = lorentzian_config.get('general_settings', {})
+        filter_settings = lorentzian_config.get('filters', {})
+        kernel_settings = lorentzian_config.get('kernel_settings', {})
+        
+        # Load features from config
+        features_config = lorentzian_config.get('features', [])
+        features = []
+        for feature_config in features_config:
+            features.append(Feature(
+                type=feature_config.get('type', 'RSI'),
+                parameter_a=feature_config.get('parameter_a', 14),
+                parameter_b=feature_config.get('parameter_b', 1)
+            ))
+        
+        # If no features in config, use defaults
+        if not features:
+            features = [
+                Feature(type="RSI", parameter_a=14, parameter_b=1),
+                Feature(type="WT", parameter_a=10, parameter_b=11),
+                Feature(type="CCI", parameter_a=20, parameter_b=1),
+                Feature(type="ADX", parameter_a=20, parameter_b=1),
+                Feature(type="MACD", parameter_a=12, parameter_b=26)
+            ]
+        
+        settings = LorentzianSettings(
+            # General Settings
+            source=general_settings.get('source', 'close'),
+            neighbors_count=general_settings.get('neighbors_count', 8),
+            max_bars_back=general_settings.get('max_bars_back', 2000),
+            
+            # Feature Engineering
+            feature_count=len(features),
+            color_compression=general_settings.get('color_compression', 1),
+            
+            # Filters
+            use_volatility_filter=filter_settings.get('use_volatility_filter', True),
+            use_regime_filter=filter_settings.get('use_regime_filter', False),
+            use_adx_filter=filter_settings.get('use_adx_filter', False),
+            use_ema_filter=filter_settings.get('use_ema_filter', False),
+            use_sma_filter=filter_settings.get('use_sma_filter', False),
+            
+            # Additional fields
+            regime_threshold=filter_settings.get('regime_threshold', -0.1),
+            adx_threshold=filter_settings.get('adx_threshold', 20),
+            ema_period=filter_settings.get('ema_period', 200),
+            sma_period=filter_settings.get('sma_period', 200),
+            use_dynamic_exits=filter_settings.get('use_dynamic_exits', False),
+            use_worst_case_estimates=filter_settings.get('use_worst_case_estimates', False),
+            enhance_kernel_smoothing=filter_settings.get('enhance_kernel_smoothing', False),
+            lag=filter_settings.get('lag', 1),
+            
+            # Kernel settings
+            lookback_window=kernel_settings.get('lookback_window', 8),
+            relative_weighting=kernel_settings.get('relative_weighting', 8.0),
+            regression_level=kernel_settings.get('regression_level', 25),
+            show_kernel_estimate=kernel_settings.get('show_kernel_estimate', True)
+        )
+        
+        self.model = LorentzianClassification(settings)
+        self.features = features
+
+    def calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate features for the current data frame"""
+        features_df = pd.DataFrame(index=df.index)
+        for feature in self.features:
+            features_df[f"{feature.type}_{feature.parameter_a}_{feature.parameter_b}"] = self.model.calculate_feature(feature, df)
+        return features_df
+
+    def calculate_distances(self, features: pd.DataFrame, idx: int) -> list:
+        """Calculate distances for the current index"""
+        distances = []
+        for i in range(len(features)):
+            if i == idx:
+                continue
+            distance = sum((features.iloc[idx] - features.iloc[i])**2)
+            distances.append((distance, i))
+        return sorted(distances)
+
+    def get_adaptive_threshold(self, distances: list) -> float:
+        """Calculate adaptive threshold based on distances"""
+        if not distances:
+            return 0.1
+        distance_values = [d[0] for d in distances]
+        return np.mean(distance_values) + np.std(distance_values)
+
+    def generate_fallback_signals(self, df: pd.DataFrame) -> pd.Series:
+        """Generate signals using a fallback method when ML is not available"""
+        signals = pd.Series(0, index=df.index)
+        
+        # Use a simple moving average crossover strategy as fallback
+        if len(df) < 50:
+            return signals
+            
+        fast_ma = df['close'].rolling(window=20).mean()
+        slow_ma = df['close'].rolling(window=50).mean()
+        
+        # Generate signals based on moving average crossover
+        for i in range(50, len(df)):
+            if fast_ma.iloc[i] > slow_ma.iloc[i] and fast_ma.iloc[i-1] <= slow_ma.iloc[i-1]:
+                signals.iloc[i] = 1  # Buy signal
+            elif fast_ma.iloc[i] < slow_ma.iloc[i] and fast_ma.iloc[i-1] >= slow_ma.iloc[i-1]:
+                signals.iloc[i] = -1  # Sell signal
+        
+        return signals
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.Series:
+        """Generate trading signals based on the Lorentzian Classification model"""
+        if 'close' not in df.columns or 'high' not in df.columns or 'low' not in df.columns:
+            print("Error: Required OHLC data columns missing. Returning neutral signals.")
+            return pd.Series(0, index=df.index)
+            
+        data = df.copy()
+        
+        try:
+            # Run the model
+            result = self.model.run(data)
+            
+            # Extract the signals (-1, 0, 1)
+            signals = result.get('signals', None)
+            
+            if signals is None:
+                print("Warning: No signals generated by Lorentzian model. Using fallback strategy.")
+                return self.generate_fallback_signals(data)
+                
+            return signals
+            
+        except Exception as e:
+            print(f"Error running Lorentzian model: {e}")
+            return self.generate_fallback_signals(data)

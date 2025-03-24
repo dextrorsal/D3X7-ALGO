@@ -76,7 +76,16 @@ env/
 *.log
 *.sqlite
 logs/
-data/
+*/trade_logs/
+*/aggregated/
+*/historical/
+*/processed/
+*/raw/
+backups/
+/backup/
+*/cache/
+*/temp/
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -262,7 +271,7 @@ cython_debug/
 .pypirc
 
 # Project specific data directories
-/data/
+D3X77-ALGO/data/
 /test_data/
 /monte_carlo_results/
 /optimization_results/
@@ -285,7 +294,7 @@ cython_debug/
 credentials.json
 config.json
 /config/
-/src/utils/wallet
+
 
 # IDE specific
 .vscode/
