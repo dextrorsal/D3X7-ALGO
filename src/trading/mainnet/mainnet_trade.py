@@ -36,7 +36,7 @@ from .security_limits import SecurityLimits
 # Import existing infrastructure
 from src.utils.wallet.wallet_cli import WalletCLI
 from src.trading.drift.account_manager import DriftAccountManager
-from src.trading.jup.jup_adapter import JupiterAdapter
+from src.trading.jup.adapter import JupiterAdapter, SOL_MINT, USDC_MINT
 
 # Configure logging
 logging.basicConfig(

@@ -12,7 +12,7 @@ from src.core.models import ExchangeCredentials
 import sys
 sys.path.append('/home/dex/ultimate_data_fetcher')
 
-from src.exchanges.auth.drift_auth import DriftAuth
+from src.exchanges.Drift.auth import DriftAuth
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

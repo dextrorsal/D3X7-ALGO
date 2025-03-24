@@ -23,7 +23,7 @@ from ..base import BaseCLI
 from ...core.config import Config
 from ...trading.drift.drift_adapter import DriftAdapter
 from ...trading.drift.drift_qt_gui import DriftGUI
-from ...trading.mainnet.drift_position_monitor import DriftPositionMonitor
+from ...trading.drift.drift_position_monitor import DriftPositionMonitor
 from ...trading.mainnet.security_limits import SecurityLimits
 from ...utils.wallet.wallet_manager import WalletManager
 

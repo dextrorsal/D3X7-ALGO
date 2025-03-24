@@ -41,3 +41,7 @@ class AuthError(DataFetcherError):
 class CredentialError(AuthError):
     """Raised when there's an issue with credentials."""
     pass
+
+class NotInitializedError(ExchangeError):
+    """Raised when trying to use a component that hasn't been initialized."""
+    pass
