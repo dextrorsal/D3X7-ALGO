@@ -85,7 +85,7 @@ class RateLimitError(ExchangeError):
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 # Now, let's modify the BinanceHandler class to use our simplified base classes
-from src.exchanges.binance import BinanceHandler as OriginalBinanceHandler
+from src.exchanges.binance.binance import BinanceHandler as OriginalBinanceHandler
 
 # Override imports in the binance module
 sys.modules['src.core.models'] = type('models', (), {
@@ -128,15 +128,22 @@ async def test_binance():
         logger.info("Successfully started Binance handler")
         
         try:
-            # Test getting markets
-            logger.info("Getting available markets from Binance...")
-            markets = await handler.get_markets()
-            logger.info(f"Found {len(markets)} markets. First 5: {markets[:5] if len(markets) >= 5 else markets}")
+            # Test market validation
+            test_markets = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "INVALID"]
+            logger.info("Testing market validation...")
+            for market in test_markets:
+                is_valid = handler.validate_market(market)
+                logger.info(f"Market {market} is {'valid' if is_valid else 'invalid'}")
             
             # Define a time range for testing
             end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(hours=24)  # Last 24 hours
             time_range = TimeRange(start=start_time, end=end_time)
+            
+            # Test ticker functionality using the client directly
+            logger.info("Testing ticker data...")
+            ticker_data = handler.client.ticker_24hr("BTCUSDT")
+            logger.info(f"BTC/USDT 24hr Ticker: Price: ${float(ticker_data['lastPrice']):.2f}, Volume: {float(ticker_data['volume']):.2f} BTC")
             
             # Fetch some candles
             logger.info(f"Fetching BTC/USDT candles from {start_time} to {end_time}")

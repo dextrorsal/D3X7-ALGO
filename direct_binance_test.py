@@ -29,7 +29,7 @@ sys.modules['src.exchanges.base'] = type('MockModule', (), {})
 # Import BaseExchangeHandler directly
 from src.exchanges.base import BaseExchangeHandler
 # Now import BinanceHandler 
-from src.exchanges.binance import BinanceHandler
+from src.exchanges.binance.binance import BinanceHandler
 
 async def main():
     logger.info("Testing Binance Handler directly")

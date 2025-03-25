@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 from src.core.config import ExchangeConfig, ExchangeCredentials
 from src.core.models import TimeRange
-from src.exchanges.binance import BinanceHandler
+from src.exchanges.binance.binance import BinanceHandler
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

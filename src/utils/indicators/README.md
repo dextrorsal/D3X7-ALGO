@@ -1,116 +1,178 @@
-# D3X7 Trading Indicators
+# 📊 Technical Indicators
 
-This folder contains technical indicators for trading strategy development and signal generation within the D3X7 algorithmic trading platform.
+This directory contains technical indicators used for market analysis and trading signal generation in the D3X7-ALGO platform.
 
-## 📊 Indicator Structure
+## 📋 Overview
 
-Each indicator follows a consistent dual-class pattern:
+The indicators module provides:
+- Traditional technical indicators (RSI, MACD, Bollinger Bands)
+- Advanced indicators (Lorentzian, SuperTrend)
+- Machine learning indicators (KNN, Logistic Regression)
+- Momentum and trend indicators (ADX, CCI, Williams %R)
+- Base indicator interface for custom implementations
 
-1. **Base Class** - Core calculation logic (e.g., `ADX`, `WilliamsR`)
-   - Handles raw calculations
-   - Offers utility methods for analyzing indicator values
-   - Maintains minimal state for streaming calculations
+## 📁 Structure
 
-2. **Indicator Class** - Signal generation wrapper (e.g., `ADXIndicator`, `WilliamsRIndicator`)
-   - Implements the `BaseIndicator` interface
-   - Loads configuration from settings files
-   - Generates trading signals (1 = buy, -1 = sell, 0 = neutral)
-   - Applies filters and signal processing logic
-
-## 🛠️ Available Indicators
-
-| Indicator | Description | File |
-|-----------|-------------|------|
-| RSI | Relative Strength Index - Momentum oscillator measuring speed and change of price movements | `rsi.py` |
-| MACD | Moving Average Convergence Divergence - Trend-following momentum indicator | `macd.py` |
-| Supertrend | Combines ATR with moving averages for trend determination | `supertrend.py` |
-| Bollinger Bands | Volatility bands placed above and below a moving average | `bollinger_bands.py` |
-| KNN | K-Nearest Neighbors machine learning classifier for price action | `knn.py` |
-| Logistic Regression | ML-based classification of price movements | `logistic_regression.py` |
-| Lorentzian | Advanced classification using Lorentzian model | `lorentzian.py` |
-| ADX | Average Directional Index for trend strength measurement | `adx.py` |
-| CCI | Commodity Channel Index for identifying cyclical trends | `cci.py` |
-| Stochastic | Momentum oscillator comparing closing price to price range | `stochastic.py` |
-| Williams %R | Momentum indicator showing overbought/oversold levels | `williams_r.py` |
-
-## 🔧 Usage Examples
-
-### Basic Usage with Base Class (Raw Calculations)
-
-```python
-from src.utils.indicators.rsi import RsiBase
-
-# Create the indicator instance
-rsi = RsiBase(period=14)
-
-# For a single update (streaming data)
-new_rsi_value = rsi.update(close_price)
-
-# For batch calculation
-prices = [100, 102, 99, 101, 103, 102, 105]
-rsi_values = rsi.calculate(prices)
-
-# Analysis helpers
-is_overbought = RsiBase.is_overbought(rsi_value, threshold=70)
-is_oversold = RsiBase.is_oversold(rsi_value, threshold=30)
+```
+indicators/
+├── base_indicator.py      # Base indicator interface
+├── adx.py                # Average Directional Index
+├── bollinger_bands.py    # Bollinger Bands
+├── cci.py               # Commodity Channel Index
+├── knn.py               # K-Nearest Neighbors
+├── logistic_regression.py # Logistic Regression
+├── lorentzian.py        # Lorentzian Classification
+├── macd.py              # Moving Average Convergence Divergence
+├── rsi.py               # Relative Strength Index
+├── stochastic.py        # Stochastic Oscillator
+├── supertrend.py        # SuperTrend
+├── williams_r.py        # Williams %R
+└── __init__.py          # Package initialization
 ```
 
-### Signal Generation with Indicator Class
+## 🔧 Components
+
+### Base Indicator
+The foundation for all technical indicators, providing common functionality.
 
 ```python
-from src.utils.indicators.rsi import RsiIndicator
-import pandas as pd
+from src.utils.indicators.base_indicator import BaseIndicator
 
-# Create the indicator instance (loads settings from config)
-rsi_indicator = RsiIndicator()
-
-# Prepare data
-df = pd.DataFrame({
-    'open': [...],
-    'high': [...],
-    'low': [...],
-    'close': [...],
-    'volume': [...]
-})
-
-# Generate trading signals
-signals = rsi_indicator.generate_signals(df)
-# Result: Series of 1 (buy), -1 (sell), or 0 (neutral)
+class CustomIndicator(BaseIndicator):
+    def __init__(self, period=14):
+        super().__init__()
+        self.period = period
+    
+    def calculate(self, data):
+        # Your indicator calculation logic
+        pass
 ```
 
-## 📝 Signal Generation Process
+### Traditional Indicators
 
-Most indicators follow this general approach for signal generation:
+#### RSI (Relative Strength Index)
+```python
+from src.utils.indicators import RSI
 
-1. Calculate the raw indicator values using TA-Lib
-2. Process each price bar sequentially
-3. Look for specific conditions (crossovers, thresholds)
-4. Apply configured filters (volatility, volume)
-5. Consider holding period logic
-6. Generate the appropriate signal (buy, sell, neutral)
+rsi = RSI(period=14)
+values = rsi.calculate(prices)
+```
 
-## ⚙️ Indicator Configuration
+#### MACD (Moving Average Convergence Divergence)
+```python
+from src.utils.indicators import MACD
 
-Indicator parameters are loaded from `config/indicator_settings.json` and typically include:
+macd = MACD(fast=12, slow=26, signal=9)
+macd_line, signal_line, histogram = macd.calculate(prices)
+```
 
-- **Calculation Parameters**: Periods, thresholds, etc.
-- **Signal Filters**: Options like `filter_signals_by` with values (`None`, `Volatility`, `Volume`, `Both`)
-- **Holding Period**: How many bars to maintain a signal
-- **Other indicator-specific parameters**
+#### Bollinger Bands
+```python
+from src.utils.indicators import BollingerBands
 
-## 🔄 Contributing
+bb = BollingerBands(period=20, std_dev=2)
+upper, middle, lower = bb.calculate(prices)
+```
 
-When creating a new indicator:
+### Advanced Indicators
 
-1. Implement the base calculation class
-2. Create an indicator class that extends `BaseIndicator`
-3. Export both classes in the module's `__init__.py`
-4. Follow the consistent naming pattern: `IndicatorName` for base and `IndicatorNameIndicator` for signal wrapper
+#### Lorentzian Classification
+```python
+from src.utils.indicators import LorentzianClassifier
 
-## 🔗 Integration
+classifier = LorentzianClassifier(
+    lookback=100,
+    dimensions=["price", "volume", "volatility"]
+)
+signals = classifier.calculate(market_data)
+```
 
-All indicators are accessible through the module's `__init__.py` for easy importing:
+#### SuperTrend
+```python
+from src.utils.indicators import SuperTrend
+
+supertrend = SuperTrend(period=10, multiplier=3)
+trend, direction = supertrend.calculate(high, low, close)
+```
+
+### Machine Learning Indicators
+
+#### K-Nearest Neighbors
+```python
+from src.utils.indicators import KNNIndicator
+
+knn = KNNIndicator(n_neighbors=5, features=["rsi", "macd"])
+predictions = knn.predict(market_data)
+```
+
+#### Logistic Regression
+```python
+from src.utils.indicators import LogisticRegressionIndicator
+
+lr = LogisticRegressionIndicator(
+    features=["price", "volume", "rsi"],
+    lookback=50
+)
+signals = lr.predict(market_data)
+```
+
+### Momentum Indicators
+
+#### ADX (Average Directional Index)
+```python
+from src.utils.indicators import ADX
+
+adx = ADX(period=14)
+adx_value, plus_di, minus_di = adx.calculate(high, low, close)
+```
+
+#### CCI (Commodity Channel Index)
+```python
+from src.utils.indicators import CCI
+
+cci = CCI(period=20)
+values = cci.calculate(high, low, close)
+```
+
+#### Williams %R
+```python
+from src.utils.indicators import WilliamsR
+
+williams = WilliamsR(period=14)
+values = williams.calculate(high, low, close)
+```
+
+## 🔄 Signal Generation
+
+Most indicators provide standardized signal outputs:
 
 ```python
-from src.utils.indicators import RsiIndicator, MacdIndicator
-``` 
+{
+    "value": 65.5,          # Main indicator value
+    "signal": "BUY",        # BUY, SELL, HOLD
+    "strength": 0.85,       # Signal strength (0-1)
+    "metadata": {
+        "indicator": "RSI",
+        "parameters": {"period": 14},
+        "timestamp": 1677686400
+    }
+}
+```
+
+## 🧪 Testing
+
+```bash
+# Run all indicator tests
+python -m pytest tests/utils/indicators/
+
+# Run specific indicator tests
+python -m pytest tests/utils/indicators/test_rsi.py
+python -m pytest tests/utils/indicators/test_macd.py
+```
+
+## 📚 Resources
+
+- [Indicator Development Guide](docs/utils/indicators/development.md)
+- [Machine Learning Integration Guide](docs/utils/indicators/ml_integration.md)
+- [Signal Generation Guide](docs/utils/indicators/signals.md)
+- [Performance Optimization Guide](docs/utils/indicators/optimization.md) 

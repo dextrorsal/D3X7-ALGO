@@ -4,12 +4,11 @@ Handles authentication for the Drift exchange using Solana wallet integration.
 """
 
 import logging
-import os
 from typing import Optional, Dict, Any
 
 from src.core.models import ExchangeCredentials
 from src.core.exceptions import AuthError
-from .client import DriftClient
+from src.utils.wallet.wallet_manager import WalletManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,43 +17,19 @@ class DriftAuth:
     
     def __init__(
         self,
-        credentials: Optional[ExchangeCredentials] = None,
-        network: str = "devnet",
-        keypair_path: Optional[str] = None
+        wallet_manager: WalletManager,
+        network: str = "mainnet",
     ):
         """Initialize Drift authentication.
         
         Args:
-            credentials: Optional exchange credentials
+            wallet_manager: Wallet manager instance for Solana wallet operations
             network: Network to connect to ("devnet" or "mainnet")
-            keypair_path: Optional path to keypair file
         """
-        self.credentials = credentials
+        self.wallet_manager = wallet_manager
         self.network = network
-        self.keypair_path = keypair_path
-        self.client: Optional[DriftClient] = None
         self.authenticated = False
-        
-        # Initialize if credentials provided
-        if self.credentials:
-            self._init_from_credentials()
-    
-    def _init_from_credentials(self) -> None:
-        """Initialize from provided credentials."""
-        if not self.credentials:
-            return
-            
-        # Extract additional parameters if available
-        if hasattr(self.credentials, 'additional_params') and self.credentials.additional_params:
-            params = self.credentials.additional_params
-            
-            # Update network if provided
-            if "network" in params:
-                self.network = params["network"]
-                
-            # Update keypair path if provided
-            if "keypair_path" in params:
-                self.keypair_path = params["keypair_path"]
+        self.wallet = None
     
     async def authenticate(self) -> bool:
         """Authenticate with Drift.
@@ -63,17 +38,13 @@ class DriftAuth:
             True if authentication successful
         """
         try:
-            # Initialize client
-            self.client = DriftClient(
-                network=self.network,
-                keypair_path=self.keypair_path
-            )
-            
-            # Initialize connection
-            await self.client.initialize()
+            # Get the main wallet
+            self.wallet = self.wallet_manager.get_wallet("MAIN")
+            if not self.wallet:
+                raise AuthError("No MAIN wallet found in wallet manager")
             
             self.authenticated = True
-            logger.info("Successfully authenticated with Drift")
+            logger.info(f"Successfully authenticated with Drift using wallet {self.wallet.pubkey}")
             return True
             
         except Exception as e:
@@ -87,21 +58,19 @@ class DriftAuth:
         Returns:
             True if authenticated
         """
-        return self.authenticated and self.client is not None and self.client.initialized
+        return self.authenticated and self.wallet is not None
     
-    def get_client(self) -> Optional[DriftClient]:
-        """Get the authenticated Drift client.
+    def get_wallet(self):
+        """Get the authenticated wallet.
         
         Returns:
-            Authenticated DriftClient instance or None
+            Authenticated wallet instance or None
         """
         if not self.is_authenticated():
             return None
-        return self.client
+        return self.wallet
     
     async def cleanup(self) -> None:
         """Cleanup authentication resources."""
-        if self.client:
-            await self.client.cleanup()
-            self.client = None
+        self.wallet = None
         self.authenticated = False

@@ -13,7 +13,7 @@ from binance.error import ClientError
 
 from src.core.models import StandardizedCandle, TimeRange
 from src.core.exceptions import ExchangeError, ValidationError
-from .base import BaseExchangeHandler, ExchangeConfig
+from src.exchanges.base import BaseExchangeHandler, ExchangeConfig
 
 logger = logging.getLogger(__name__)
 

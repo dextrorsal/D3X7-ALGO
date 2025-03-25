@@ -1,3 +1,3 @@
 """
-Scripts for various operations in the Ultimate Data Fetcher project
+Data fetching scripts for the Ultimate Data Fetcher project
 """

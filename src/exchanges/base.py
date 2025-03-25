@@ -12,14 +12,13 @@ import asyncio
 from src.core.models import StandardizedCandle, ExchangeCredentials, TimeRange
 from src.core.exceptions import ValidationError, ExchangeError, RateLimitError, ApiError
 from src.core.config import ExchangeConfig
-from src.exchanges.auth import BaseAuth
 
 logger = logging.getLogger(__name__)
 
 class BaseExchangeHandler(ABC):
     """Abstract base class for all exchange handlers."""
 
-    def __init__(self, config: ExchangeConfig, auth_handler: Optional[BaseAuth] = None):
+    def __init__(self, config: ExchangeConfig, auth_handler=None):
         """
         Initialize the exchange handler with configuration.
         

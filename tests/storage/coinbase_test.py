@@ -19,7 +19,7 @@ sys.path.append(project_root)
 
 from src.core.models import TimeRange
 from src.exchanges.base import ExchangeConfig
-from src.exchanges.coinbase import CoinbaseHandler
+from src.exchanges.coinbase.coinbase import CoinbaseHandler
 from src.utils.indicators.rsi import RSI
 
 # Set up rich console

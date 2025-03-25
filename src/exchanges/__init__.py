@@ -7,8 +7,8 @@ import importlib.util
 import sys
 
 from .base import BaseExchangeHandler
-from .binance import BinanceHandler
-from .coinbase import CoinbaseHandler
+from .binance.binance import BinanceHandler
+from .coinbase.coinbase import CoinbaseHandler
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -29,14 +29,14 @@ except ImportError as e:
     DriftHandler = None
 
 try:
-    from .jup import JupiterHandler
+    from .jupiter.jup import JupiterHandler
     __all__.append('JupiterHandler')
 except ImportError as e:
     logger.warning(f"Could not import JupiterHandler: {e}")
     JupiterHandler = None
 
 try:
-    from .bitget import BitgetHandler
+    from .bitget.bitget import BitgetHandler
     __all__.append('BitgetHandler')
 except ImportError as e:
     logger.warning(f"Could not import BitgetHandler: {e}")
@@ -70,3 +70,5 @@ def get_exchange_handler(exchange_config) -> Optional[BaseExchangeHandler]:
     except Exception as e:
         logger.error(f"Error initializing handler for {exchange_config.name}: {e}")
         return None
+
+"""Exchange implementations."""

@@ -29,7 +29,7 @@ async def main():
     try:
         from src.core.config import Config, ExchangeConfig, ExchangeCredentials
         from src.core.models import TimeRange
-        from src.exchanges.binance import BinanceHandler
+        from src.exchanges.binance.binance import BinanceHandler
         
         logger.info("✅ Successfully imported core modules")
         
