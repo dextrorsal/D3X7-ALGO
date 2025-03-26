@@ -18,10 +18,17 @@ logger = logging.getLogger(__name__)
 class DriftHandler(BaseExchangeHandler):
     """Handler for Drift exchange operations."""
     
-    def __init__(self, config: ExchangeConfig, wallet_manager=None):
-        """Initialize the Drift handler."""
+    def __init__(self, config: ExchangeConfig, wallet_manager=None, drift_config=None):
+        """Initialize the Drift handler.
+        
+        Args:
+            config: Exchange configuration
+            wallet_manager: Wallet manager instance
+            drift_config: Drift-specific configuration (for devnet/mainnet settings)
+        """
         super().__init__(config)
         self.wallet_manager = wallet_manager
+        self.drift_config = drift_config
         self.client = None
         self.data_provider = None
         self.auth = None
@@ -39,8 +46,12 @@ class DriftHandler(BaseExchangeHandler):
             self.auth = DriftAuth(self.wallet_manager)
             await self.auth.authenticate()
             
-            # Initialize client with authenticated wallet
-            self.client = DriftClient(self.auth.get_wallet())
+            # Initialize client with authenticated wallet and config
+            self.client = DriftClient(
+                self.auth.get_wallet(),
+                network="devnet" if self.drift_config else "mainnet",
+                config=self.drift_config
+            )
             await self.client.initialize()
             
             # Initialize data provider
@@ -73,7 +84,8 @@ class DriftHandler(BaseExchangeHandler):
     
     def _validate_resolution(self, resolution: str):
         """Validate candle resolution."""
-        if resolution.lower() not in self.valid_resolutions:
+        resolution = resolution.lower()  # Convert to lowercase first
+        if resolution not in self.valid_resolutions:
             raise ValueError(
                 f"Invalid resolution {resolution}. "
                 f"Must be one of: {', '.join(self.valid_resolutions)}"
@@ -91,7 +103,8 @@ class DriftHandler(BaseExchangeHandler):
                 raise ValueError("Data provider not initialized")
             
             self._validate_resolution(resolution)
-            self.validate_market(market)
+            if not self.validate_market(market):
+                raise ValueError(f"Market {market} not found")
             
             candles = await self.data_provider.fetch_historical_candles(
                 market=market,
@@ -100,6 +113,9 @@ class DriftHandler(BaseExchangeHandler):
             )
             
             return candles
+        except ValueError as e:
+            logger.error(f"Error fetching historical candles from Drift: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error fetching historical candles from Drift: {e}")
             return []

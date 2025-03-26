@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple test script for UltimateDataFetcher
+Simple test script for UltimateDataFetcher    *****DRIFT SOL 1D NOT FETCHING*****
 """
 
 import asyncio

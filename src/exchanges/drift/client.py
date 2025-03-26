@@ -30,15 +30,17 @@ class DriftClient:
     Handles client initialization, connection management, and market lookups.
     """
     
-    def __init__(self, wallet: Union[SolanaWallet, str], network: str = "mainnet"):
+    def __init__(self, wallet: Union[SolanaWallet, str], network: str = "mainnet", config=None):
         """Initialize the Drift client.
         
         Args:
             wallet: Either a SolanaWallet instance or a keypair path string
             network: Network to connect to ("devnet" or "mainnet")
+            config: Additional configuration for devnet/mainnet settings
         """
         load_dotenv()
         self.network = network.lower()
+        self.config = config
         
         # Handle wallet input
         if isinstance(wallet, str):
@@ -112,12 +114,27 @@ class DriftClient:
                     compute_units=1_400_000      # Default from example
                 )
                 
-                self.client = DriftPyClient(
-                    self.connection,
-                    Wallet(self.keypair),
-                    self.network,
-                    tx_params=tx_params
-                )
+                # Use config if provided (for devnet)
+                if self.config and self.network == 'devnet':
+                    self.client = DriftPyClient(
+                        self.connection,
+                        Wallet(self.keypair),
+                        self.network,
+                        tx_params=tx_params,
+                        market_lookup_table=self.config.market_lookup_table,
+                        perp_market_indexes=[0, 1],  # Start with SOL and BTC markets
+                        spot_market_indexes=[0]  # Start with SOL spot market
+                    )
+                else:
+                    self.client = DriftPyClient(
+                        self.connection,
+                        Wallet(self.keypair),
+                        self.network,
+                        tx_params=tx_params
+                    )
+                
+                # Subscribe to market accounts
+                await self.client.subscribe()
                 
                 # Initialize user account if needed
                 try:

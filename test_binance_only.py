@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for directly testing Binance handler
+Test script for directly testing Binance handler   ******Error in test: 'BinanceHandler' object has no attribute 'get_markets'******
 """
 
 import asyncio

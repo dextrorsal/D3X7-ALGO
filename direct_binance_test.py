@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Direct test script for Binance handler without loading other exchange modules
+Direct test script for Binance handler without loading other exchange modules  *****cannot import name 'BaseExchangeHandler' from 'MockModule' (unknown location)***8
 """
 
 import asyncio
