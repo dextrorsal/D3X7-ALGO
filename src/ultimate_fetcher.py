@@ -14,14 +14,13 @@ from .core.config import Config
 from .core.models import TimeRange
 from .core.exceptions import DataFetcherError
 from .exchanges import get_exchange_handler
-from .storage.processed import ProcessedDataStorage
 from .utils.log_setup import setup_logging
 from .core.symbol_mapper import SymbolMapper
-from .storage.live import LiveDataStorage
-from .data.providers.supabase_provider import SupabaseProvider
+from .storage import DataManager
 from .utils.wallet.wallet_manager import WalletManager
 
 logger = logging.getLogger(__name__)
+
 
 class UltimateDataFetcher:
     """Main orchestrator for fetching and managing crypto data."""
@@ -32,17 +31,25 @@ class UltimateDataFetcher:
             self.config = config
         else:
             self.config = Config.from_ini(config_path)
-        self.processed_storage = ProcessedDataStorage(self.config.storage)
-        self.live_storage = LiveDataStorage(self.config.storage)
-        # Add Supabase provider if configured
-        self.supabase_provider = None
-        if hasattr(self.config, 'supabase') and self.config.supabase.get('enabled', False):
-            supabase_url = self.config.supabase.get('url')
-            supabase_key = self.config.supabase.get('api_key')
-            if supabase_url and supabase_key:
-                self.supabase_provider = SupabaseProvider(supabase_url, supabase_key)
-                logger.info("Initialized Supabase data provider")
-        
+        # Initialize DataManager with Supabase as backend
+        supabase_url = None
+        supabase_key = None
+        if hasattr(self.config, "supabase") and self.config.supabase.get(
+            "enabled", False
+        ):
+            supabase_url = self.config.supabase.get("url")
+            supabase_key = self.config.supabase.get("key")
+        print(f"DEBUG: UltimateDataFetcher Supabase URL: {supabase_url}")
+        print(
+            f"DEBUG: UltimateDataFetcher Supabase Key: {'REDACTED' if supabase_key else None}"
+        )
+        if not (supabase_url and supabase_key):
+            raise ValueError(
+                "Supabase URL and Key must be provided in config for Supabase integration."
+            )
+        self.data_manager = DataManager(
+            self.config.storage, supabase_url, supabase_key, storage_backend="supabase"
+        )
         self.exchange_handlers = {}
 
     async def __aenter__(self):
@@ -57,23 +64,27 @@ class UltimateDataFetcher:
     async def start(self):
         """Start the data fetcher and initialize all configured exchanges."""
         logger.info("Starting Ultimate Data Fetcher")
-        
+
         # Initialize wallet manager if needed for Drift
         wallet_manager = None
-        if 'drift' in self.config.exchanges and self.config.exchanges['drift'].enabled:
+        if "drift" in self.config.exchanges and self.config.exchanges["drift"].enabled:
             try:
                 # Check if MAIN_KEY_PATH is set
-                main_key_path = os.environ.get('MAIN_KEY_PATH')
+                main_key_path = os.environ.get("MAIN_KEY_PATH")
                 if main_key_path and os.path.exists(main_key_path):
-                    logger.info(f"Initializing wallet manager with MAIN_KEY_PATH: {main_key_path}")
+                    logger.info(
+                        f"Initializing wallet manager with MAIN_KEY_PATH: {main_key_path}"
+                    )
                     wallet_manager = WalletManager()
                     await wallet_manager.load_wallet("main")
                     logger.info("Successfully initialized wallet manager for Drift")
                 else:
-                    logger.warning("MAIN_KEY_PATH not set or file does not exist. Drift might not authenticate properly.")
+                    logger.warning(
+                        "MAIN_KEY_PATH not set or file does not exist. Drift might not authenticate properly."
+                    )
             except Exception as e:
                 logger.error(f"Failed to initialize wallet manager: {e}")
-        
+
         # Initialize the symbol mapper (once)
         self.initialize_symbol_mapper()
 
@@ -81,16 +92,19 @@ class UltimateDataFetcher:
         for exchange_name, exchange_config in self.config.exchanges.items():
             if exchange_config.enabled:
                 try:
-                    if exchange_name == 'drift' and wallet_manager:
+                    if exchange_name == "drift" and wallet_manager:
                         # Special case for Drift - pass wallet manager
                         from .exchanges.drift import DriftHandler
-                        handler = DriftHandler(exchange_config, wallet_manager=wallet_manager)
+
+                        handler = DriftHandler(
+                            exchange_config, wallet_manager=wallet_manager
+                        )
                         await handler.start()
                     else:
                         # Regular initialization for other exchanges
                         handler = get_exchange_handler(exchange_config)
                         await handler.start()
-                    
+
                     self.exchange_handlers[exchange_name] = handler
                     logger.info(f"Initialized {exchange_name} handler")
                 except Exception as e:
@@ -111,20 +125,26 @@ class UltimateDataFetcher:
     def initialize_symbol_mapper(self):
         """Initialize the symbol mapper with all available markets."""
         self.symbol_mapper = SymbolMapper()
-        
+
         # Register markets for each exchange
         for exchange_name, handler in self.exchange_handlers.items():
             try:
-                if hasattr(handler, 'markets') and handler.markets:
+                if hasattr(handler, "markets") and handler.markets:
                     self.symbol_mapper.register_exchange(exchange_name, handler.markets)
-                elif hasattr(handler, 'config') and hasattr(handler.config, 'markets'):
+                elif hasattr(handler, "config") and hasattr(handler.config, "markets"):
                     # Use markets from config if available
-                    self.symbol_mapper.register_exchange(exchange_name, handler.config.markets)
+                    self.symbol_mapper.register_exchange(
+                        exchange_name, handler.config.markets
+                    )
                 else:
-                    logger.warning(f"No markets available for {exchange_name} during symbol mapper initialization")
+                    logger.warning(
+                        f"No markets available for {exchange_name} during symbol mapper initialization"
+                    )
             except Exception as e:
-                logger.warning(f"Error registering markets for {exchange_name}: {str(e)}")
-                
+                logger.warning(
+                    f"Error registering markets for {exchange_name}: {str(e)}"
+                )
+
         # Count the number of exchanges with registered symbols
         registered_exchanges = len(self.symbol_mapper.supported_symbols)
         logger.info(f"Initialized symbol mapper with {registered_exchanges} exchanges")
@@ -134,14 +154,14 @@ class UltimateDataFetcher:
         markets: List[str],
         time_range: TimeRange,
         resolution: str,
-        exchanges: Optional[List[str]] = None
+        exchanges: Optional[List[str]] = None,
     ):
         """Fetch historical data for specified markets and time range."""
         if not exchanges:
             exchanges = list(self.exchange_handlers.keys())
 
         # Initialize symbol mapper if not already done
-        if not hasattr(self, 'symbol_mapper') or self.symbol_mapper is None:
+        if not hasattr(self, "symbol_mapper") or self.symbol_mapper is None:
             self.initialize_symbol_mapper()
 
         for exchange_name in exchanges:
@@ -154,11 +174,11 @@ class UltimateDataFetcher:
                 try:
                     # First, check if the market is directly in the handler's markets list
                     is_valid_market = False
-                    
+
                     # Safely check if markets attribute exists
-                    if hasattr(handler, 'markets') and handler.markets:
+                    if hasattr(handler, "markets") and handler.markets:
                         is_valid_market = market_symbol in handler.markets
-                    
+
                     # If not found directly, try validating as a standard symbol
                     if not is_valid_market:
                         try:
@@ -168,83 +188,102 @@ class UltimateDataFetcher:
                             else:
                                 is_valid_market = result
                         except Exception as e:
-                            logger.warning(f"Error validating {market_symbol} on {exchange_name}: {str(e)}")
+                            logger.warning(
+                                f"Error validating {market_symbol} on {exchange_name}: {str(e)}"
+                            )
                             continue
 
                     if not is_valid_market:
-                        logger.info(f"Market {market_symbol} not supported by {exchange_name}, skipping")
+                        logger.info(
+                            f"Market {market_symbol} not supported by {exchange_name}, skipping"
+                        )
                         continue
 
                     # Get the exchange-specific format if needed
                     try:
-                        if hasattr(handler, 'markets') and handler.markets and market_symbol in handler.markets:
+                        if (
+                            hasattr(handler, "markets")
+                            and handler.markets
+                            and market_symbol in handler.markets
+                        ):
                             exchange_market = market_symbol
-                        elif hasattr(self, 'symbol_mapper') and self.symbol_mapper:
+                        elif hasattr(self, "symbol_mapper") and self.symbol_mapper:
                             try:
-                                exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, market_symbol)
+                                exchange_market = self.symbol_mapper.to_exchange_symbol(
+                                    exchange_name, market_symbol
+                                )
                             except Exception:
                                 # If symbol mapping fails, try using the original symbol
                                 exchange_market = market_symbol
                         else:
                             exchange_market = market_symbol
                     except Exception as e:
-                        logger.warning(f"Symbol mapping error for {market_symbol} on {exchange_name}: {str(e)}")
+                        logger.warning(
+                            f"Symbol mapping error for {market_symbol} on {exchange_name}: {str(e)}"
+                        )
                         exchange_market = market_symbol
 
-                    logger.info(f"Fetching historical data for {market_symbol} (exchange format: {exchange_market}) from {exchange_name}")
-                    
+                    logger.info(
+                        f"Fetching historical data for {market_symbol} (exchange format: {exchange_market}) from {exchange_name}"
+                    )
+
                     try:
-                        candles = await handler.fetch_historical_candles(exchange_market, time_range, resolution)
-                        
+                        candles = await handler.fetch_historical_candles(
+                            exchange_market, time_range, resolution
+                        )
+
                         if not candles:
-                            logger.warning(f"No data returned for {market_symbol} from {exchange_name}")
+                            logger.warning(
+                                f"No data returned for {market_symbol} from {exchange_name}"
+                            )
                             continue
-                            
+
                         # Verify candles have the expected format
                         if isinstance(candles, list) and len(candles) > 0:
                             # Check if the first candle has the expected attributes
                             first_candle = candles[0]
-                            if not hasattr(first_candle, 'timestamp'):
-                                logger.error(f"Invalid candle format for {market_symbol} from {exchange_name}: missing timestamp")
+                            if not hasattr(first_candle, "timestamp"):
+                                logger.error(
+                                    f"Invalid candle format for {market_symbol} from {exchange_name}: missing timestamp"
+                                )
                                 continue
                         else:
-                            logger.warning(f"Empty or invalid candle data for {market_symbol} from {exchange_name}")
+                            logger.warning(
+                                f"Empty or invalid candle data for {market_symbol} from {exchange_name}"
+                            )
                             continue
 
-                        await self.processed_storage.store_candles(
-                            exchange_name,
-                            market_symbol,
-                            resolution,
-                            candles
+                        # Store using DataManager (Supabase backend)
+                        await self.data_manager.store_data(
+                            candles,
+                            exchange=exchange_name,
+                            market=market_symbol,
+                            resolution=resolution,
                         )
-                        
-                        # Add Supabase storage if enabled
-                        if self.supabase_provider:
-                            await self.supabase_provider.store_candles(
-                                exchange_name,
-                                market_symbol,
-                                resolution,
-                                candles
-                            )
-                        logger.info(f"Stored {len(candles)} candles for {market_symbol} from {exchange_name}")
+                        logger.info(
+                            f"Stored {len(candles)} candles for {market_symbol} from {exchange_name}"
+                        )
 
                     except Exception as e:
-                        logger.error(f"Error fetching data for {market_symbol} from {exchange_name}: {e}")
+                        logger.error(
+                            f"Error fetching data for {market_symbol} from {exchange_name}: {e}"
+                        )
 
                 except Exception as e:
-                    logger.error(f"Error processing market {market_symbol} from {exchange_name}: {e}")
+                    logger.error(
+                        f"Error processing market {market_symbol} from {exchange_name}: {e}"
+                    )
 
     async def start_live_fetching(
-        self,
-        markets: List[str],
-        resolution: str,
-        exchanges: Optional[List[str]] = None
+        self, markets: List[str], resolution: str, exchanges: Optional[List[str]] = None
     ):
         """Start live data fetching for specified markets."""
         if not exchanges:
             exchanges = list(self.exchange_handlers.keys())
 
-        logger.info(f"Starting live data fetching for {markets} with resolution {resolution}")
+        logger.info(
+            f"Starting live data fetching for {markets} with resolution {resolution}"
+        )
         logger.info(f"Using exchanges: {exchanges}")
 
         try:
@@ -256,8 +295,10 @@ class UltimateDataFetcher:
 
                     for standard_market in markets:
                         try:
-                            exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, standard_market)
-                            
+                            exchange_market = self.symbol_mapper.to_exchange_symbol(
+                                exchange_name, standard_market
+                            )
+
                             # Validate market symbol; await if necessary.
                             result = handler.validate_standard_symbol(standard_market)
                             if asyncio.iscoroutine(result):
@@ -266,27 +307,33 @@ class UltimateDataFetcher:
                                 valid = result
                             if not valid:
                                 continue
-                            
-                            logger.debug(f"Fetching live data for {standard_market} from {exchange_name}")
+
+                            logger.debug(
+                                f"Fetching live data for {standard_market} from {exchange_name}"
+                            )
                             candle = await handler.fetch_live_candles(
-                                market=exchange_market,
-                                resolution=resolution
+                                market=exchange_market, resolution=resolution
                             )
 
-                            await self.live_storage.store_processed_candle(
-                                exchange_name,
-                                standard_market,
-                                resolution,
-                                candle
+                            # Store using DataManager (Supabase backend)
+                            await self.data_manager.store_data(
+                                [candle],
+                                exchange=exchange_name,
+                                market=standard_market,
+                                resolution=resolution,
                             )
 
-                            logger.debug(f"Stored live candle for {standard_market} from {exchange_name}")
+                            logger.debug(
+                                f"Stored live candle for {standard_market} from {exchange_name}"
+                            )
 
                         except Exception as e:
-                            logger.error(f"Error fetching live data for {standard_market} from {exchange_name}: {e}")
+                            logger.error(
+                                f"Error fetching live data for {standard_market} from {exchange_name}: {e}"
+                            )
 
                 await asyncio.sleep(60)  # Adjust based on resolution
-                
+
         except KeyboardInterrupt:
             logger.info("Live data fetching interrupted by user")
         except Exception as e:
@@ -298,11 +345,11 @@ class UltimateDataFetcher:
         markets: List[str],
         time_range: TimeRange,
         resolution: str,
-        exchanges: Optional[List[str]] = None
+        exchanges: Optional[List[str]] = None,
     ):
         """
         Convert historical data to TFRecord format for machine learning.
-        
+
         Args:
             markets: List of market symbols
             time_range: Time range to convert
@@ -311,34 +358,44 @@ class UltimateDataFetcher:
         """
         if not exchanges:
             exchanges = list(self.exchange_handlers.keys())
-        
-        logger.info(f"Converting historical data to TFRecord format for {markets} with resolution {resolution}")
-        
+
+        logger.info(
+            f"Converting historical data to TFRecord format for {markets} with resolution {resolution}"
+        )
+
         for exchange_name in exchanges:
             for market_symbol in markets:
                 try:
                     # Convert market symbol if needed
                     if exchange_name in self.symbol_mapper.exchanges:
-                        exchange_market = self.symbol_mapper.to_exchange_symbol(exchange_name, market_symbol)
+                        exchange_market = self.symbol_mapper.to_exchange_symbol(
+                            exchange_name, market_symbol
+                        )
                     else:
                         exchange_market = market_symbol
-                    
-                    logger.info(f"Converting {exchange_name}/{exchange_market} data to TFRecord format")
-                    
+
+                    logger.info(
+                        f"Converting {exchange_name}/{exchange_market} data to TFRecord format"
+                    )
+
                     # Convert to TFRecord
                     await self.data_manager.convert_to_tfrecord(
                         exchange_name,
                         exchange_market,
                         resolution,
                         time_range.start,
-                        time_range.end
+                        time_range.end,
                     )
-                    
-                    logger.info(f"Converted {exchange_name}/{exchange_market} data to TFRecord format")
-                    
+
+                    logger.info(
+                        f"Converted {exchange_name}/{exchange_market} data to TFRecord format"
+                    )
+
                 except Exception as e:
-                    logger.error(f"Error converting {market_symbol} from {exchange_name} to TFRecord: {e}")
-        
+                    logger.error(
+                        f"Error converting {market_symbol} from {exchange_name} to TFRecord: {e}"
+                    )
+
         logger.info("TFRecord conversion completed")
 
     def get_pytorch_dataloader(
@@ -347,18 +404,18 @@ class UltimateDataFetcher:
         resolution: str,
         exchange: str,
         batch_size: int = 32,
-        shuffle: bool = True
+        shuffle: bool = True,
     ):
         """
         Get a PyTorch DataLoader for the specified data.
-        
+
         Args:
             market: Market symbol
             resolution: Candle resolution
             exchange: Exchange name
             batch_size: Batch size
             shuffle: Whether to shuffle the data
-            
+
         Returns:
             torch.utils.data.DataLoader: DataLoader for the data
         """
@@ -367,31 +424,23 @@ class UltimateDataFetcher:
             exchange_market = self.symbol_mapper.to_exchange_symbol(exchange, market)
         else:
             exchange_market = market
-        
+
         return self.data_manager.get_pytorch_dataloader(
-            exchange,
-            exchange_market,
-            resolution,
-            batch_size,
-            shuffle
+            exchange, exchange_market, resolution, batch_size, shuffle
         )
 
     def get_tensorflow_dataset(
-        self,
-        market: str,
-        resolution: str,
-        exchange: str,
-        batch_size: int = 32
+        self, market: str, resolution: str, exchange: str, batch_size: int = 32
     ):
         """
         Get a TensorFlow Dataset for the specified data.
-        
+
         Args:
             market: Market symbol
             resolution: Candle resolution
             exchange: Exchange name
             batch_size: Batch size
-            
+
         Returns:
             tf.data.Dataset: TensorFlow dataset
         """
@@ -400,29 +449,50 @@ class UltimateDataFetcher:
             exchange_market = self.symbol_mapper.to_exchange_symbol(exchange, market)
         else:
             exchange_market = market
-        
+
         return self.data_manager.get_tensorflow_dataset(
-            exchange,
-            exchange_market,
-            resolution,
-            batch_size
+            exchange, exchange_market, resolution, batch_size
         )
 
     async def main():
         """Main entry point for the Ultimate Data Fetcher."""
         parser = argparse.ArgumentParser(description="Ultimate Crypto Data Fetcher")
-        parser.add_argument("--config", default=".env", help="Path to configuration file")
-        parser.add_argument("--mode", choices=["historical", "live"], required=True,
-                            help="Fetching mode: historical or live")
-        parser.add_argument("--markets", nargs="+", help="Markets to fetch (e.g., BTC-PERP ETH-PERP)")
+        parser.add_argument(
+            "--config", default=".env", help="Path to configuration file"
+        )
+        parser.add_argument(
+            "--mode",
+            choices=["historical", "live"],
+            required=True,
+            help="Fetching mode: historical or live",
+        )
+        parser.add_argument(
+            "--markets", nargs="+", help="Markets to fetch (e.g., BTC-PERP ETH-PERP)"
+        )
         parser.add_argument("--exchanges", nargs="+", help="Exchanges to use")
-        parser.add_argument("--resolution", default="1", choices=["1", "15", "60", "240", "1D" , "1W", "5", "30"], help="Candle resolution (e.g., 1, 5, 15)")
-        parser.add_argument("--start-date", help="Start date for historical data (YYYY-MM-DD)")
-        parser.add_argument("--end-date", help="End date for historical data (YYYY-MM-DD)")
-        parser.add_argument("--convert-tfrecord", action="store_true", 
-                            help="Convert historical data to TFRecord format")
-        parser.add_argument("--batch-size", type=int, default=32,
-                            help="Batch size for TFRecord datasets")
+        parser.add_argument(
+            "--resolution",
+            default="1",
+            choices=["1", "15", "60", "240", "1D", "1W", "5", "30"],
+            help="Candle resolution (e.g., 1, 5, 15)",
+        )
+        parser.add_argument(
+            "--start-date", help="Start date for historical data (YYYY-MM-DD)"
+        )
+        parser.add_argument(
+            "--end-date", help="End date for historical data (YYYY-MM-DD)"
+        )
+        parser.add_argument(
+            "--convert-tfrecord",
+            action="store_true",
+            help="Convert historical data to TFRecord format",
+        )
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=32,
+            help="Batch size for TFRecord datasets",
+        )
 
         args = parser.parse_args()
 
@@ -437,37 +507,40 @@ class UltimateDataFetcher:
         try:
             if args.mode == "historical":
                 if not args.start_date or not args.end_date:
-                    raise DataFetcherError("Start and end dates required for historical mode")
+                    raise DataFetcherError(
+                        "Start and end dates required for historical mode"
+                    )
 
                 time_range = TimeRange(
-                    start=datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc),
-                    end=datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    start=datetime.strptime(args.start_date, "%Y-%m-%d").replace(
+                        tzinfo=timezone.utc
+                    ),
+                    end=datetime.strptime(args.end_date, "%Y-%m-%d").replace(
+                        tzinfo=timezone.utc
+                    ),
                 )
 
                 await fetcher.fetch_historical_data(
-                    args.markets,
-                    time_range,
-                    args.resolution,
-                    args.exchanges
+                    args.markets, time_range, args.resolution, args.exchanges
                 )
             elif args.mode == "live":
                 await fetcher.start_live_fetching(
                     markets=args.markets,
                     resolution=args.resolution,
-                    exchanges=args.exchanges
+                    exchanges=args.exchanges,
                 )
             elif args.convert_tfrecord:
                 # Convert historical data to TFRecord format
                 time_range = TimeRange(
                     start=datetime.fromisoformat(args.start_date),
-                    end=datetime.fromisoformat(args.end_date)
+                    end=datetime.fromisoformat(args.end_date),
                 )
-                
+
                 await fetcher.convert_historical_to_tfrecord(
                     markets=args.markets,
                     time_range=time_range,
                     resolution=args.resolution,
-                    exchanges=args.exchanges
+                    exchanges=args.exchanges,
                 )
         finally:
             await fetcher.stop()
