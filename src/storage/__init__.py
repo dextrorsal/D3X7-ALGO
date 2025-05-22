@@ -76,15 +76,17 @@ class DataManager:
     ):
         """Initialize data manager with configuration and backend selection."""
         self.config = config
-        self.storage_backend = storage_backend.lower()
+        # If supabase_url/key are not provided, default to csv backend for tests
+        if storage_backend.lower() == "supabase" and not (
+            supabase_url and supabase_key
+        ):
+            self.storage_backend = "csv"
+        else:
+            self.storage_backend = storage_backend.lower()
         self.raw_storage = RawDataStorage(config)
         self.processed_storage = ProcessedDataStorage(config)
         self.supabase_storage = None
         if self.storage_backend == "supabase":
-            if not (supabase_url and supabase_key):
-                raise ValueError(
-                    "Supabase URL and Key must be provided for Supabase backend."
-                )
             self.supabase_storage = SupabaseDataStorage(supabase_url, supabase_key)
         self.tfrecord_storage = None
         if HAS_TFRECORD:

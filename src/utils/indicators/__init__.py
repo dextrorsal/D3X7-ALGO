@@ -4,7 +4,7 @@ from .rsi import RsiIndicator
 from .macd import MacdIndicator
 from .supertrend import SupertrendIndicator
 from .knn import KNNIndicator
-from .logistic_regression import LogisticRegressionIndicator
+from .logistic import LogisticRegressionIndicator
 from .lorentzian import LorentzianIndicator
 from .bollinger_bands import BollingerBandsIndicator
 from .stochastic import StochasticIndicator

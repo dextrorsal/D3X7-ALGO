@@ -1,0 +1,34 @@
+==== Indicator Analysis Summary ====
+
+==== Supertrend Signal Analysis ====
+Buy signals: 0 (0.00%)
+Sell signals: 1 (0.20%)
+Neutral signals: 499 (99.80%)
+Average buy signal duration: 0.00 periods
+Average sell signal duration: 1.00 periods
+Average neutral signal duration: 249.50 periods
+
+==== KNN Signal Analysis ====
+Buy signals: 9 (1.80%)
+Sell signals: 453 (90.60%)
+Neutral signals: 38 (7.60%)
+Average buy signal duration: 1.12 periods
+Average sell signal duration: 50.33 periods
+Average neutral signal duration: 38.00 periods
+
+==== Logistic Regression Signal Analysis ====
+Buy signals: 413 (82.60%)
+Sell signals: 0 (0.00%)
+Neutral signals: 87 (17.40%)
+Average buy signal duration: 4.98 periods
+Average sell signal duration: 0.00 periods
+Average neutral signal duration: 1.05 periods
+
+==== Lorentzian Signal Analysis ====
+Buy signals: 0 (0.00%)
+Sell signals: 0 (0.00%)
+Neutral signals: 500 (100.00%)
+Average buy signal duration: 0.00 periods
+Average sell signal duration: 0.00 periods
+Average neutral signal duration: 500.00 periods
+

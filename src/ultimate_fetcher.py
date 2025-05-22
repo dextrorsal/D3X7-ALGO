@@ -454,6 +454,16 @@ class UltimateDataFetcher:
             exchange, exchange_market, resolution, batch_size
         )
 
+    @property
+    def raw_storage(self):
+        """Expose raw_storage from data_manager for test compatibility."""
+        return self.data_manager.raw_storage
+
+    @property
+    def processed_storage(self):
+        """Expose processed_storage from data_manager for test compatibility."""
+        return self.data_manager.processed_storage
+
     async def main():
         """Main entry point for the Ultimate Data Fetcher."""
         parser = argparse.ArgumentParser(description="Ultimate Crypto Data Fetcher")
