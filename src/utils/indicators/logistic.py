@@ -7,8 +7,12 @@ from datetime import datetime
 from .base_indicator import BaseIndicator
 from src.core.config import Config
 
+
 def sigmoid(z):
+    # Patch: clip z to avoid overflow in np.exp for large values
+    z = np.clip(z, -500, 500)
     return 1 / (1 + np.exp(-z))
+
 
 def minimax(value, data_window):
     """
@@ -21,6 +25,7 @@ def minimax(value, data_window):
         return value
     return (hi - lo) * (value - lo) / (hi - lo) + lo
 
+
 def normalize_array(arr):
     """
     Normalize a 1D array to the range [0,1] using min-max scaling.
@@ -31,6 +36,7 @@ def normalize_array(arr):
         return arr  # avoid division by zero
     return (arr - lo) / (hi - lo)
 
+
 class SingleDimLogisticRegression:
     """
     Replicates the Pine Script's single-weight logistic regression logic.
@@ -38,6 +44,7 @@ class SingleDimLogisticRegression:
     it fits a single weight 'w' via gradient descent and returns (loss, prediction),
     where prediction is the sigmoid output on the last data point.
     """
+
     def __init__(self, lookback=3, learning_rate=0.0009, iterations=1000):
         self.lookback = lookback
         self.learning_rate = learning_rate
@@ -69,25 +76,28 @@ class SingleDimLogisticRegression:
 
         return final_loss, last_pred
 
-class LogisticRegressionIndicator(BaseIndicator):
-    def __init__(self, config_path='config/indicator_settings.json'):
-        config = Config()
-        lr_config = config.get('indicators', {}).get('logistic_regression', {})
 
-        self.lookback = lr_config.get('lookback', 3)
-        self.norm_lookback = lr_config.get('norm_lookback', 2)
-        self.learning_rate = lr_config.get('learning_rate', 0.0009)
-        self.iterations = lr_config.get('iterations', 1000)
-        self.filter_signals_by = lr_config.get('filter_signals_by', 'None')
-        self.use_price_for_signal_generation = lr_config.get('use_price_data', True)
-        self.easteregg = lr_config.get('easteregg', False)  # For historical data, set to false
-        self.holding_period = lr_config.get('holding_period', 5)
+class LogisticRegressionIndicator(BaseIndicator):
+    def __init__(self, config_path="config/indicator_settings.json"):
+        config = Config()
+        lr_config = config.get("indicators", {}).get("logistic_regression", {})
+
+        self.lookback = lr_config.get("lookback", 3)
+        self.norm_lookback = lr_config.get("norm_lookback", 2)
+        self.learning_rate = lr_config.get("learning_rate", 0.0009)
+        self.iterations = lr_config.get("iterations", 1000)
+        self.filter_signals_by = lr_config.get("filter_signals_by", "None")
+        self.use_price_for_signal_generation = lr_config.get("use_price_data", True)
+        self.easteregg = lr_config.get(
+            "easteregg", False
+        )  # For historical data, set to false
+        self.holding_period = lr_config.get("holding_period", 5)
 
         # Initialize the single-dim logistic regression model
         self.model = SingleDimLogisticRegression(
             lookback=self.lookback,
             learning_rate=self.learning_rate,
-            iterations=self.iterations
+            iterations=self.iterations,
         )
 
     def generate_signals(self, df: pd.DataFrame) -> pd.Series:
@@ -108,7 +118,7 @@ class LogisticRegressionIndicator(BaseIndicator):
         """
         DEBUG = False  # Set to False to disable debug output
 
-        if 'close' not in df.columns:
+        if "close" not in df.columns:
             return pd.Series(0, index=df.index)
 
         signals = pd.Series(0, index=df.index, dtype=int)
@@ -124,24 +134,24 @@ class LogisticRegressionIndicator(BaseIndicator):
 
         # Define base/synth data sources
         # Compute base array (close values) and synth array (volume percentage changes)
-        base = df['close'].values
-        
+        base = df["close"].values
+
         # For synth we'll use a function of volume if available, otherwise use 'high'
-        if 'volume' in df.columns:
-            vol = df['volume'].values
+        if "volume" in df.columns:
+            vol = df["volume"].values
             vol_pct = np.zeros_like(vol)
             for i in range(1, len(vol)):
-                if vol[i-1] != 0:
-                    vol_pct[i] = (vol[i] - vol[i-1]) / vol[i-1] * 100
+                if vol[i - 1] != 0:
+                    vol_pct[i] = (vol[i] - vol[i - 1]) / vol[i - 1] * 100
             synth = vol_pct
         else:
-            synth = df['high'].values
+            synth = df["high"].values
 
         # Loop through each bar starting from lookback
         for i in range(self.lookback, n):
             # Extract data windows for base and synth
-            base_window = base[i-self.lookback:i]
-            synth_window = synth[i-self.lookback:i]
+            base_window = base[i - self.lookback : i]
+            synth_window = synth[i - self.lookback : i]
 
             # Get loss and raw prediction using single weight logistic regression
             loss, raw = self.model.fit_single_bar(base_window, synth_window)
@@ -150,9 +160,9 @@ class LogisticRegressionIndicator(BaseIndicator):
 
             # Apply minimax scaling using the last 'norm_lookback' bars
             if i >= self.lookback + self.norm_lookback:
-                losses_window = losses[i-self.norm_lookback:i]
-                raws_window = raws[i-self.norm_lookback:i]
-                
+                losses_window = losses[i - self.norm_lookback : i]
+                raws_window = raws[i - self.norm_lookback : i]
+
                 normalized_losses[i] = minimax(loss, losses_window)
                 normalized_preds[i] = minimax(raw, raws_window)
 
@@ -160,7 +170,7 @@ class LogisticRegressionIndicator(BaseIndicator):
                 if self.easteregg:
                     hour = datetime.now().hour
                     hour_scaling = hour / 24.0  # Normalize hour to 0-1
-                    
+
                     if hour_scaling > 0.5:  # After noon, start to de-risk
                         normalized_losses[i] = normalized_losses[i] * (1 + hour_scaling)
                         normalized_preds[i] = normalized_preds[i] * (1 - hour_scaling)
@@ -173,18 +183,24 @@ class LogisticRegressionIndicator(BaseIndicator):
                     if curr_price < normalized_losses[i]:
                         new_signal = -1  # SELL
                     elif curr_price > normalized_losses[i]:
-                        new_signal = 1   # BUY
+                        new_signal = 1  # BUY
                 else:
                     # Use crossover logic
                     if i > 0:
-                        norm_loss_prev = normalized_losses[i-1]
-                        norm_pred_prev = normalized_preds[i-1]
-                        
+                        norm_loss_prev = normalized_losses[i - 1]
+                        norm_pred_prev = normalized_preds[i - 1]
+
                         # Buy when pred crosses above loss
-                        if norm_pred_prev <= norm_loss_prev and normalized_preds[i] > normalized_losses[i]:
+                        if (
+                            norm_pred_prev <= norm_loss_prev
+                            and normalized_preds[i] > normalized_losses[i]
+                        ):
                             new_signal = 1
                         # Sell when pred crosses below loss
-                        elif norm_pred_prev >= norm_loss_prev and normalized_preds[i] < normalized_losses[i]:
+                        elif (
+                            norm_pred_prev >= norm_loss_prev
+                            and normalized_preds[i] < normalized_losses[i]
+                        ):
                             new_signal = -1
 
                 # Apply filters
@@ -196,7 +212,7 @@ class LogisticRegressionIndicator(BaseIndicator):
                     bar_count = 0
                 else:
                     bar_count += 1
-                    
+
                 if bar_count >= self.holding_period and current_signal != 0:
                     new_signal = 0
                     bar_count = 0
@@ -206,33 +222,35 @@ class LogisticRegressionIndicator(BaseIndicator):
                 current_signal = new_signal
 
                 if DEBUG and i % 100 == 0:
-                    print(f"Bar {i}: Loss={loss:.6f}, NormLoss={normalized_losses[i]:.6f}, "
-                          f"Raw={raw:.6f}, NormPred={normalized_preds[i]:.6f}, Signal={new_signal}")
+                    print(
+                        f"Bar {i}: Loss={loss:.6f}, NormLoss={normalized_losses[i]:.6f}, "
+                        f"Raw={raw:.6f}, NormPred={normalized_preds[i]:.6f}, Signal={new_signal}"
+                    )
 
         return signals
 
     def _passes_filter(self, df, i):
         """Apply filters to the signal generation process."""
-        if self.filter_signals_by == 'None':
+        if self.filter_signals_by == "None":
             return True
         if i < 10:
             return True
 
         # Volatility filter
-        if self.filter_signals_by in ('Volatility', 'Both'):
-            high = df['high'].values
-            low = df['low'].values
-            close = df['close'].values
+        if self.filter_signals_by in ("Volatility", "Both"):
+            high = df["high"].values
+            low = df["low"].values
+            close = df["close"].values
             atr1 = talib.ATR(high, low, close, 1)
             atr10 = talib.ATR(high, low, close, 10)
             if atr1[i] <= atr10[i]:
                 return False
 
         # Volume filter
-        if self.filter_signals_by in ('Volume', 'Both'):
-            if 'volume' not in df.columns:
+        if self.filter_signals_by in ("Volume", "Both"):
+            if "volume" not in df.columns:
                 return True
-            vol = df['volume'].values
+            vol = df["volume"].values
             rsi_vol = talib.RSI(vol, 14)
             if rsi_vol[i] <= 49:
                 return False

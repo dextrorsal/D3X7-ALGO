@@ -1,7 +1,7 @@
 ==== Indicator Analysis Summary for BTC-USD 1h ====
 
 Data Source: Yahoo Finance
-Data Range: 2024-05-22 19:00:00+00:00 to 2025-05-22 19:00:00+00:00
+Data Range: 2024-05-22 21:00:00+00:00 to 2025-05-22 21:00:00+00:00
 Total Candles: 8760
 
 ==== Supertrend Signal Analysis ====
@@ -13,11 +13,11 @@ Average sell signal duration: 1.00 periods
 Average neutral signal duration: 4379.50 periods
 
 ==== KNN Signal Analysis ====
-Buy signals: 4934 (56.32%)
-Sell signals: 3788 (43.24%)
+Buy signals: 4997 (57.04%)
+Sell signals: 3725 (42.52%)
 Neutral signals: 38 (0.43%)
-Average buy signal duration: 8.42 periods
-Average sell signal duration: 6.46 periods
+Average buy signal duration: 8.41 periods
+Average sell signal duration: 6.27 periods
 Average neutral signal duration: 38.00 periods
 
 ==== Logistic Regression Signal Analysis ====
@@ -29,10 +29,10 @@ Average sell signal duration: 0.00 periods
 Average neutral signal duration: 1.00 periods
 
 ==== Lorentzian Signal Analysis ====
-Buy signals: 920 (10.50%)
-Sell signals: 81 (0.92%)
-Neutral signals: 7759 (88.57%)
-Average buy signal duration: 4.92 periods
-Average sell signal duration: 4.50 periods
-Average neutral signal duration: 37.67 periods
+Buy signals: 567 (6.47%)
+Sell signals: 620 (7.08%)
+Neutral signals: 7573 (86.45%)
+Average buy signal duration: 4.33 periods
+Average sell signal duration: 4.13 periods
+Average neutral signal duration: 26.85 periods
 

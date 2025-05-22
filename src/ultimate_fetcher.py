@@ -21,6 +21,8 @@ from .utils.wallet.wallet_manager import WalletManager
 
 logger = logging.getLogger(__name__)
 
+os.makedirs("logs", exist_ok=True)
+
 
 class UltimateDataFetcher:
     """Main orchestrator for fetching and managing crypto data."""

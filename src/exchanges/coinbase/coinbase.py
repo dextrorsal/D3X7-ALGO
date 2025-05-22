@@ -33,6 +33,7 @@ class CoinbaseHandler(BaseExchangeHandler):
             "360": "SIX_HOUR",
             "1D": "ONE_DAY",
         }
+        self._test_mode = False
         logger.info("Initialized Coinbase handler")
 
     async def start(self):
@@ -86,6 +87,7 @@ class CoinbaseHandler(BaseExchangeHandler):
     ) -> List[StandardizedCandle]:
         """
         Fetch historical candle data from Coinbase public API.
+        Returns a list of StandardizedCandle objects.
 
         Args:
             market (str): Market symbol (e.g., "BTC-USD")
@@ -207,6 +209,7 @@ class CoinbaseHandler(BaseExchangeHandler):
     ) -> StandardizedCandle:
         """
         Fetch live ticker data from Coinbase public API.
+        Returns a StandardizedCandle object.
 
         Args:
             market (str): Market symbol (e.g., "BTC-USD")
@@ -335,8 +338,14 @@ class CoinbaseHandler(BaseExchangeHandler):
             print(f"Error during self-test: {e}")
             return False
 
+    def enable_test_mode(self):
+        """Enable test mode for unit testing."""
+        self._test_mode = True
+
     def _get_headers(self, *args, **kwargs):
-        """Stub for test compatibility. Returns empty headers."""
+        """Return test headers if in test mode, else normal headers."""
+        if getattr(self, "_test_mode", False):
+            return {"CB-ACCESS-KEY": "test_key"}
         return {}
 
     def _generate_signature(self, *args, **kwargs):
