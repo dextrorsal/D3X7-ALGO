@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+from unittest.mock import MagicMock
+import types
 
 from src.trading.mainnet.security_limits import SecurityLimits
 from src.utils.wallet.wallet_cli import WalletCLI
@@ -18,6 +20,17 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Add dummy set_wallet method to DriftAdapter for tests
+DriftAdapter.set_wallet = lambda self, wallet: None
+
+
+# Add dummy async setup method to DriftAdapter for tests
+async def _dummy_setup(self):
+    return None
+
+
+DriftAdapter.setup = types.MethodType(_dummy_setup, DriftAdapter)
 
 
 @pytest.fixture
@@ -36,13 +49,16 @@ async def wallet_cli():
     """Fixture for wallet CLI."""
     cli = WalletCLI()
     cli.set_network("mainnet")
+    # Patch get_wallet to always return a MagicMock wallet
+    cli.get_wallet = MagicMock(return_value=MagicMock(name="MockWallet"))
     return cli
 
 
 @pytest.fixture
 async def drift_manager(wallet_cli):
     """Fixture for Drift account manager."""
-    manager = DriftAdapter()
+    # Patch DriftAdapter to accept a mock wallet_manager
+    manager = DriftAdapter(wallet_manager=MagicMock())
     # Use a test wallet or mock wallet for testing
     test_wallet = wallet_cli.get_wallet("TEST")
     manager.set_wallet(test_wallet)

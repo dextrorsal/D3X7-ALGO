@@ -2,7 +2,6 @@ from supabase import create_client
 import pandas as pd
 from datetime import datetime
 import asyncio
-from typing import List, Dict, Any
 
 
 class SupabaseAdapter:
@@ -78,7 +77,7 @@ class SupabaseAdapter:
                     base_asset, quote_asset = parts
                 else:
                     # Handle symbols like BTCUSDT, ETHUSDC, etc.
-                    for q in ["USDT", "USDC", "USD"]:
+                    for q in ["USDT", "USDC", "USD", "PERP"]:
                         if symbol.endswith(q):
                             base_asset = symbol[: -len(q)]
                             quote_asset = q

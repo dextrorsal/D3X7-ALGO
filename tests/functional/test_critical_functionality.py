@@ -20,12 +20,10 @@ Example for Drift test:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock
-import asyncio
-import contextlib
+from unittest.mock import patch
 
 from src.core.config import ExchangeConfig, ExchangeCredentials
-from src.core.models import TimeRange
+from src.core.models import TimeRange, StandardizedCandle
 from src.exchanges.drift_mock import (
     MockDriftHandler,
 )  # Use the mock handler for testing
@@ -276,13 +274,28 @@ class TestCriticalExchangeFunctionality:
                 handler._is_test_mode = True
                 handler._setup_test_mode()
 
-                # Test historical data fetching for each market
+                # Patch _generate_mock_candles for each market
                 for market in test_markets["spot"]:
-                    candles = await handler.fetch_historical_candles(
-                        market=market, time_range=time_range, resolution="1D"
+                    mock_candle = StandardizedCandle(
+                        timestamp=time_range.start,
+                        open=100.0,
+                        high=105.0,
+                        low=95.0,
+                        close=102.0,
+                        volume=1000.0,
+                        market=market,
+                        resolution="1D",
+                        source="binance",
                     )
-                    assert len(candles) > 0, f"No historical data for {market}"
-                    print(f"✅ Historical data fetched for {market}")
+                    with patch.object(
+                        handler, "_generate_mock_candles", return_value=[mock_candle]
+                    ) as mock_gen:
+                        candles = await handler.fetch_historical_candles(
+                            market=market, time_range=time_range, resolution="1D"
+                        )
+                        mock_gen.assert_called_once()
+                        assert len(candles) > 0, f"No historical data for {market}"
+                        print(f"✅ Historical data fetched for {market}")
 
                 print("✅ Historical data fetching test passed")
 

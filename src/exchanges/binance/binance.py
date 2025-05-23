@@ -5,7 +5,6 @@ Simplified Binance exchange handler for fetching historical and live candle data
 import logging
 from typing import List, Any
 from datetime import datetime, timezone, timedelta
-import os
 
 from binance.spot import Spot
 from binance.error import ClientError
@@ -13,7 +12,6 @@ from binance.error import ClientError
 from src.core.models import StandardizedCandle, TimeRange
 from src.core.exceptions import ExchangeError, ValidationError
 from src.exchanges.base import BaseExchangeHandler, ExchangeConfig
-from src.core.symbol_mapper import SymbolMapper
 
 logger = logging.getLogger(__name__)
 
@@ -222,11 +220,7 @@ class BinanceHandler(BaseExchangeHandler):
 
     def validate_market(self, market: str) -> bool:
         """Strictly validate if a market is supported by Binance."""
-        mapper = SymbolMapper()
-        try:
-            symbol = mapper.to_exchange_symbol("binance", market)
-        except Exception:
-            symbol = market.replace("-", "").upper()
+        symbol = self._convert_market_symbol(market)
         supported = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
         return symbol in supported
 
@@ -307,7 +301,9 @@ class BinanceHandler(BaseExchangeHandler):
         return True
 
     async def convert_standard_symbol(self, market: str) -> str:
-        """Convert a standard market symbol format to exchange-specific format."""
+        """
+        Convert a standard market symbol format to exchange-specific format.
+        """
         # Regular symbols like BTC-USDT need to be converted to BTCUSDT
         return market.replace("-", "")
 
@@ -317,9 +313,12 @@ class BinanceHandler(BaseExchangeHandler):
         return True
 
     async def convert_exchange_symbol(self, market: str) -> str:
-        """Convert an exchange-specific market symbol format to standard format."""
+        """
+        Convert an exchange-specific market symbol format to standard format.
+        """
         # Convert from BTCUSDT to BTC-USDT
-        # This is a basic implementation - you may need more sophisticated logic
+        # This is a basic implementation - you may need more
+        # sophisticated logic
         stablecoins = [
             "USDT",
             "BUSD",
@@ -356,7 +355,9 @@ class BinanceHandler(BaseExchangeHandler):
     # async def get_account_balance(self) -> Dict[str, float]:
     #     """Get account balance."""
     #     # Not implemented in this handler
-    #     raise NotImplementedError("Account balance not supported in this handler.")
+    #     raise NotImplementedError(
+    #         "Account balance not supported in this handler."
+    #     )
 
     # async def get_ticker(self, market: str) -> Dict[str, Any]:
     #     """Get ticker information for a market."""
@@ -438,6 +439,22 @@ class BinanceHandler(BaseExchangeHandler):
 
     def _convert_market_symbol(self, market: str) -> str:
         """Convert various market symbol formats to Binance format."""
+        market = market.upper().replace(" ", "")
+        # Map all variants to the correct Binance symbol
+        mapping = {
+            "BTC-USD": "BTCUSDT",
+            "BTC-USDT": "BTCUSDT",
+            "BTC-PERP": "BTCUSDT",
+            "ETH-USD": "ETHUSDT",
+            "ETH-USDT": "ETHUSDT",
+            "ETH-PERP": "ETHUSDT",
+            "SOL-USD": "SOLUSDT",
+            "SOL-USDT": "SOLUSDT",
+            "SOL-PERP": "SOLUSDT",
+        }
+        if market in mapping:
+            return mapping[market]
+        # Fallback: remove dashes and upper
         return market.replace("-", "").upper()
 
     async def get_markets(self) -> List[str]:
