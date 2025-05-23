@@ -7,7 +7,6 @@ import asyncio
 import logging
 import time
 import pytest
-from decimal import Decimal
 from pathlib import Path
 import json
 from solders.keypair import Keypair
@@ -18,6 +17,7 @@ from src.trading.devnet.devnet_adapter import DevnetAdapter
 from src.trading.mainnet.security_limits import SecurityLimits
 from src.trading.drift.drift_adapter import DriftAdapter
 from src.trading.jup.jup_adapter import JupiterAdapter
+from src.utils.wallet.wallet_manager import WalletManager
 
 # Configure logging
 logging.basicConfig(
@@ -55,13 +55,13 @@ class TestSecurityIntegration:
             json.dump(secret_bytes, f)
 
         # Initialize adapters with correct parameters
-        self.drift = DriftAdapter(network="devnet", keypair_path=str(self.wallet_path))
+        self.drift = DriftAdapter(wallet_manager=WalletManager(), network="devnet")
 
         # Check if the JupiterAdapter accepts the same parameters
         try:
-            self.jupiter = JupiterAdapter(keypair_path=str(self.wallet_path))
+            self.jupiter = JupiterAdapter()
         except Exception as e:
-            logger.warning(f"Error creating JupiterAdapter with keypair_path: {e}")
+            logger.warning(f"Error creating JupiterAdapter: {e}")
             self.jupiter = JupiterAdapter(network="devnet")
 
         # Initialize security limits with config as keyword arguments
@@ -83,19 +83,19 @@ class TestSecurityIntegration:
             "slippage_bps": 50,
             "emergency_shutdown_triggers": {"loss_threshold_pct": 10.0},
         }
-        self.security.validate_position_size.return_value = True
-        self.security.validate_leverage.return_value = True
-        self.security.update_daily_volume.return_value = False
-        self.security.validate_swap_size.return_value = True
-        self.security.validate_slippage.return_value = True
+        self.security.validate_position_size = AsyncMock(return_value=True)
+        self.security.validate_leverage = AsyncMock(return_value=True)
+        self.security.update_daily_volume = AsyncMock(return_value=False)
+        self.security.validate_swap_size = AsyncMock(return_value=True)
+        self.security.validate_slippage = AsyncMock(return_value=True)
         self.security.daily_volume = 0
         self.security.emergency_shutdown = False
-        self.security.reset_emergency_shutdown = MagicMock()
-        self.security.check_emergency_shutdown = MagicMock(return_value=True)
-        self.security.calculate_position_risk = MagicMock(return_value=0.1)
-        self.security.is_risk_acceptable = MagicMock(return_value=True)
-        self.security.is_market_stressed = MagicMock(return_value=False)
-        self.security.validate_config = MagicMock(return_value=True)
+        self.security.reset_emergency_shutdown = AsyncMock()
+        self.security.check_emergency_shutdown = AsyncMock(return_value=True)
+        self.security.calculate_position_risk = AsyncMock(return_value=0.1)
+        self.security.is_risk_acceptable = AsyncMock(return_value=True)
+        self.security.is_market_stressed = AsyncMock(return_value=False)
+        self.security.validate_config = AsyncMock(return_value=True)
         self.jupiter.execute_swap = AsyncMock(return_value={"status": "success"})
         self.jupiter.get_market_price = AsyncMock(return_value=100.0)
         self.jupiter.get_ultra_quote = AsyncMock(
@@ -171,7 +171,8 @@ async def test_security_features():
 
         # 2. Test session timeout
         logger.info("\n=== Testing Session Management ===")
-        helper.security_manager.session_timeout = 5  # Set to 5 seconds for testing
+        # Set to 5 seconds for testing
+        helper.security_manager.session_timeout = 5
         logger.info("Waiting for session timeout...")
         time.sleep(6)
 

@@ -121,15 +121,6 @@ class TestMainnetTrading:
         """Helper method to execute test trades."""
         security_limits = SecurityLimits(**(security_config or {}))
 
-        if not security_limits.validate_trade_size(market, size):
-            return {
-                "status": "rejected",
-                "reason": "trade_size_exceeded",
-                "market": market,
-                "size": size,
-                "side": side,
-            }
-
         market_indices = {"SOL-PERP": 0, "BTC-PERP": 1, "ETH-PERP": 2}
 
         if market not in market_indices:
@@ -137,6 +128,15 @@ class TestMainnetTrading:
                 "status": "rejected",
                 "reason": "unsupported_market",
                 "market": market,
+            }
+
+        if not security_limits.validate_trade_size(market, size):
+            return {
+                "status": "rejected",
+                "reason": "trade_size_exceeded",
+                "market": market,
+                "size": size,
+                "side": side,
             }
 
         # For test mode, return simulated result
