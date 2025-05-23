@@ -4,7 +4,7 @@ import warnings
 import logging
 
 try:
-    import talib
+import talib
 
     _has_talib_rsi = hasattr(talib, "RSI")
     _has_talib_atr = hasattr(talib, "ATR")
@@ -33,10 +33,10 @@ class RsiBase:
         self.prices.append(price)
         if len(self.prices) > self.period * 2:  # Keep sufficient history
             self.prices.pop(0)
-
+            
         if len(self.prices) >= self.period:
             if talib and _has_talib_rsi:
-                return talib.RSI(np.array(self.prices), timeperiod=self.period)[-1]
+            return talib.RSI(np.array(self.prices), timeperiod=self.period)[-1]
             else:
                 warnings.warn("talib.RSI not found, using fallback RSI implementation.")
                 logger.warning(
@@ -48,11 +48,11 @@ class RsiBase:
 
 class RsiIndicator(BaseIndicator):
     """RSI indicator wrapper with signal generation functionality"""
-
+    
     def __init__(self, config_path="config/indicator_settings.json"):
         config = Config()
         rsi_config = config.get("indicators", {}).get("rsi", {})
-
+        
         self.period = rsi_config.get("period", 14)
         self.overbought = rsi_config.get("overbought", 70)
         self.oversold = rsi_config.get("oversold", 30)
@@ -94,7 +94,7 @@ class RsiIndicator(BaseIndicator):
                 bar_count = 0
             else:
                 bar_count += 1
-
+                
             if bar_count >= self.holding_period and new_signal != 0:
                 new_signal = 0
                 bar_count = 0
@@ -120,8 +120,8 @@ class RsiIndicator(BaseIndicator):
             low = df["low"].values
             close = df["close"].values
             if talib and _has_talib_atr:
-                atr1 = talib.ATR(high, low, close, 1)
-                atr10 = talib.ATR(high, low, close, 10)
+            atr1 = talib.ATR(high, low, close, 1)
+            atr10 = talib.ATR(high, low, close, 10)
             else:
                 warnings.warn("talib.ATR not found, using fallback ATR implementation.")
                 logger.warning(
@@ -138,7 +138,7 @@ class RsiIndicator(BaseIndicator):
                 return True
             vol = df["volume"].values
             if talib and _has_talib_rsi:
-                rsi_vol = talib.RSI(vol, 14)
+            rsi_vol = talib.RSI(vol, 14)
             else:
                 warnings.warn(
                     "talib.RSI not found, using fallback RSI implementation for volume."

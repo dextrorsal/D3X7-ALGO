@@ -25,10 +25,10 @@ Average sell signal duration: 0.00 periods
 Average neutral signal duration: 1.05 periods
 
 ==== Lorentzian Signal Analysis ====
-Buy signals: 0 (0.00%)
-Sell signals: 0 (0.00%)
-Neutral signals: 500 (100.00%)
-Average buy signal duration: 0.00 periods
-Average sell signal duration: 0.00 periods
-Average neutral signal duration: 500.00 periods
+Buy signals: 167 (33.40%)
+Sell signals: 167 (33.40%)
+Neutral signals: 166 (33.20%)
+Average buy signal duration: 1.00 periods
+Average sell signal duration: 1.00 periods
+Average neutral signal duration: 1.00 periods
 

@@ -294,8 +294,8 @@ class TestCriticalExchangeFunctionality:
                             market=market, time_range=time_range, resolution="1D"
                         )
                         mock_gen.assert_called_once()
-                        assert len(candles) > 0, f"No historical data for {market}"
-                        print(f"✅ Historical data fetched for {market}")
+                    assert len(candles) > 0, f"No historical data for {market}"
+                    print(f"✅ Historical data fetched for {market}")
 
                 print("✅ Historical data fetching test passed")
 

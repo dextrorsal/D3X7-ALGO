@@ -64,9 +64,9 @@ async def binance_handler():
     handler._setup_test_mode()
     await handler.start()
     try:
-        yield handler
+    yield handler
     finally:
-        await handler.stop()
+    await handler.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +85,12 @@ class TestDriftHandler:
                 "get_markets",
                 new=AsyncMock(return_value=["SOL-PERP", "BTC-PERP"]),
             ):
-                await handler.start()
-                markets = await handler.get_markets()
-                assert isinstance(markets, list)
-                assert len(markets) > 0
-                assert "SOL-PERP" in markets
-                await handler.stop()
+        await handler.start()
+        markets = await handler.get_markets()
+        assert isinstance(markets, list)
+        assert len(markets) > 0
+        assert "SOL-PERP" in markets
+        await handler.stop()
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(5)
@@ -106,7 +106,7 @@ class TestDriftHandler:
         """Test fetching historical candles from Drift."""
         handler = DriftHandler(mock_config, wallet_manager=WalletManager())
         with patch.object(handler, "start", new=AsyncMock(return_value=None)):
-            await handler.start()
+        await handler.start()
             # Mock data_provider to avoid ValueError
             handler.data_provider = MagicMock()
             handler.data_provider.fetch_historical_candles = AsyncMock(
@@ -130,7 +130,7 @@ class TestDriftHandler:
             )
             assert len(candles) > 0
             assert candles[0].market == "BTC-PERP"
-            await handler.stop()
+        await handler.stop()
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(5)
@@ -138,7 +138,7 @@ class TestDriftHandler:
         """Test fetching live candles from Drift."""
         handler = DriftHandler(mock_config, wallet_manager=WalletManager())
         with patch.object(handler, "start", new=AsyncMock(return_value=None)):
-            await handler.start()
+        await handler.start()
             # Mock data_provider to avoid AttributeError
             handler.data_provider = MagicMock()
             handler.data_provider.fetch_live_candle = AsyncMock(
@@ -160,7 +160,7 @@ class TestDriftHandler:
             assert candle is not None
             assert candle.market == "BTC-PERP"
             assert candle.resolution == "1m"
-            await handler.stop()
+        await handler.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ class TestBinanceHandler:
             ("ETH-PERP", "ETHUSDT"),  # Drift format to Binance
             ("SOL-PERP", "SOLUSDT"),  # Drift format to Binance
         ]
-
+        
         for input_market, expected_output in test_cases:
             converted = binance_handler._convert_market_symbol(input_market)
             assert converted == expected_output, (
@@ -217,7 +217,7 @@ class TestBinanceHandler:
             assert not binance_handler.validate_market(market), (
                 f"Market {market} should be invalid"
             )
-
+            
         # Markets that should raise ValidationError
         # Skip this part of the test as it's causing issues
         # The implementation correctly raises ValidationError for None, 123, ""
@@ -231,7 +231,7 @@ class TestBinanceHandler:
         markets = await binance_handler.get_markets()
         assert isinstance(markets, list), "Markets should be returned as a list"
         assert len(markets) > 0, "At least one market should be available"
-
+        
         # Check market format
         for market in markets:
             assert "-" not in market, f"Market {market} should not contain hyphens"
@@ -247,7 +247,7 @@ class TestBinanceHandler:
         assert "symbols" in info, "Exchange info should contain symbols"
         assert "timezone" in info, "Exchange info should contain timezone"
         assert "serverTime" in info, "Exchange info should contain serverTime"
-
+        
         # Check symbol information
         for symbol in info["symbols"]:
             assert "symbol" in symbol, "Symbol info should contain symbol name"
@@ -269,7 +269,7 @@ class TestBinanceHandler:
         """Test fetching historical candles from Binance."""
         # Force test mode to avoid API calls
         binance_handler._is_test_mode = True
-
+        
         # Patch the _generate_mock_candles method since we're in test mode
         from src.core.models import StandardizedCandle
 
@@ -312,10 +312,10 @@ class TestBinanceHandler:
             market="BTCUSDT",
             raw_data={},
         )
-
+        
         # Force test mode to avoid API calls
         binance_handler._is_test_mode = True
-
+        
         # Patch the _generate_mock_candle method since we're in test mode
         with patch.object(
             binance_handler, "_generate_mock_candle", return_value=mock_candle
@@ -339,17 +339,17 @@ class TestBinanceHandler:
         start_time = datetime.now()
         mock_response = [
             [
-                int(datetime.now(timezone.utc).timestamp() * 1000),
-                "100.0",
-                "105.0",
-                "95.0",
-                "102.0",
-                "1000.0",
-                int(datetime.now(timezone.utc).timestamp() * 1000),
-                "100000.0",
-                100,
-                "500.0",
-                "50000.0",
+            int(datetime.now(timezone.utc).timestamp() * 1000),
+            "100.0",
+            "105.0",
+            "95.0",
+            "102.0",
+            "1000.0",
+            int(datetime.now(timezone.utc).timestamp() * 1000),
+            "100000.0",
+            100,
+            "500.0",
+            "50000.0",
                 "0",
             ]
         ]
@@ -398,11 +398,11 @@ class TestCoinbaseHandler:
             ):
                 mock_response = [
                     [
-                        int(time_range.start.timestamp()),
-                        100.0,
-                        105.0,
-                        95.0,
-                        102.0,
+                    int(time_range.start.timestamp()),
+                    100.0,
+                    105.0,
+                    95.0,
+                    102.0,
                         1000.0,
                     ]
                 ]

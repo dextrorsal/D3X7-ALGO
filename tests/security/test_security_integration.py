@@ -83,13 +83,12 @@ class TestSecurityIntegration:
             "slippage_bps": 50,
             "emergency_shutdown_triggers": {"loss_threshold_pct": 10.0},
         }
+        # Patch all async methods as AsyncMock
         self.security.validate_position_size = AsyncMock(return_value=True)
         self.security.validate_leverage = AsyncMock(return_value=True)
         self.security.update_daily_volume = AsyncMock(return_value=False)
         self.security.validate_swap_size = AsyncMock(return_value=True)
         self.security.validate_slippage = AsyncMock(return_value=True)
-        self.security.daily_volume = 0
-        self.security.emergency_shutdown = False
         self.security.reset_emergency_shutdown = AsyncMock()
         self.security.check_emergency_shutdown = AsyncMock(return_value=True)
         self.security.calculate_position_risk = AsyncMock(return_value=0.1)
@@ -102,22 +101,25 @@ class TestSecurityIntegration:
             return_value={"inputMint": "mock", "outputMint": "mock"}
         )
         self.jupiter.execute_ultra_swap = AsyncMock(return_value={"status": "success"})
-
+        self.security.daily_volume = 0
+        self.security.emergency_shutdown = False
         yield
-
         # Cleanup
         if self.wallet_path.exists():
             self.wallet_path.unlink()
-
-        if hasattr(self.drift, "cleanup") and callable(self.drift.cleanup):
-            await self.drift.cleanup()
-        elif hasattr(self.drift, "close") and callable(self.drift.close):
-            await self.drift.close()
-
-        if hasattr(self.jupiter, "cleanup") and callable(self.jupiter.cleanup):
-            await self.jupiter.cleanup()
-        elif hasattr(self.jupiter, "close") and callable(self.jupiter.close):
-            await self.jupiter.close()
+        # Only await if the method is async
+        drift_cleanup = getattr(self.drift, "cleanup", None)
+        if callable(drift_cleanup):
+            if asyncio.iscoroutinefunction(drift_cleanup):
+                await drift_cleanup()
+            else:
+                drift_cleanup()
+        jupiter_cleanup = getattr(self.jupiter, "cleanup", None)
+        if callable(jupiter_cleanup):
+            if asyncio.iscoroutinefunction(jupiter_cleanup):
+                await jupiter_cleanup()
+            else:
+                jupiter_cleanup()
 
     # Basic Security Tests
     async def test_position_size_limits(self):
@@ -152,7 +154,7 @@ class TestSecurityIntegration:
 
     # Configuration Tests
     def test_config_validation(self):
-        assert True
+        assert True  # Not async, so no pytest.mark.asyncio
 
 
 async def test_security_features():
